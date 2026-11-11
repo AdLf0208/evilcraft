@@ -1,0 +1,28 @@
+{
+  "variants": {
+    "facing=east,lit=false": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=east,lit=true": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=north,lit=false": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=north,lit=true": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=south,lit=false": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=south,lit=true": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=west,lit=false": {
+      "model": "evilcraft:block/blood_chest"
+    },
+    "facing=west,lit=true": {
+      "model": "evilcraft:block/blood_chest"
+    }
+  }
+}

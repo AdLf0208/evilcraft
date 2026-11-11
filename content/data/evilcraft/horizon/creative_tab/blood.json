@@ -1,0 +1,8 @@
+{
+  "icon": "evilcraft:blood_chest",
+  "items": [
+    "evilcraft:blood_chest",
+    "evilcraft:blood_extractor"
+  ],
+  "title": "itemGroup.evilcraft"
+}

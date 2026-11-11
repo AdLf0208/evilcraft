@@ -1,0 +1,9 @@
+# Port-owned content mod for the EvilCraft 1.2.100 slice: the blood chest block, the
+# blood extractor item, the chest's menu type and the carried assets. The two textures
+# are upstream's own MIT assets, read from the exact ATM10 jar (see ../FINDINGS.md).
+id = "evilcraft"
+name = "EvilCraft"
+version = "0.1.0"
+api = "0.2"
+side = "both"
+capabilities = ["registries"]

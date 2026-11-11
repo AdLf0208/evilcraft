@@ -1,0 +1,49 @@
+id = "evilcraft"
+kind = "native-mod"
+name = "evilcraft"
+summary = "A Horizon port of evilcraft."
+description = """
+A port of [evilcraft](CyclopsMC/EvilCraft) for Horizon.
+
+**Implemented so far**
+
+- | Half | What | Source |
+- |---|---|---|
+- | Item | `evilcraft:blood_extractor` — a container for 5,000 mB of blood that fills when the player kills a mob | jar item + `ItemBloodExtractor`, `ItemBloodExtractorConfig` |
+- | Menu | `evilcraft:blood_chest_menu` — 11 slots, 2 data slots (tank, capacity) | `ContainerBloodChest` (2×5 + 1) |
+- Every number is upstream's; `FINDINGS.md` names the file each came from. The one
+- that reads wrong at first glance: `AnvilRepairAction` returns **25F**, which
+- `RepairItemTickAction` *multiplies* by `mBPerDamage` (5), so an anvil step costs
+- mB** — pinned by `a_chipped_anvil_becomes_an_anvil_for_one_hundred_twenty_five_mb`.
+
+**Not yet ported**
+
+- Recipes are not carried.** `blood_chest` needs `evilcraft:blood_infusion_core`
+- (a Blood Infuser product) and `blood_extractor` needs `dark_spike` + `dark_gem`;
+- none of those are in this slice, so both items are creative-only for now.
+- The curse roll is not applied.** `randomBadEnchants = true`,
+- `randomBadEnchantsChance = 10000` is recorded in `runtime.rs`
+- (`BAD_ENCHANT_CHANCE`) but adding an enchantment component is not implemented.
+- The BER chest model is not carried.** `RenderBlockEntityBloodChest` draws a
+- chest model with `textures/model/blood_chest.png`; a content model cannot do a
+
+Original copyright and licence notices are kept in this repository. Pinned to
+Horizon 1d63e0a and horizon-mixins 5a64af93. Help with the remaining slices is
+welcome.
+"""
+authors = ["AdLf0208"]
+owners = ["AdLf0208"]
+owner_ids = [107615167]
+license = "MIT"
+source = "https://github.com/AdLf0208/evilcraft"
+icon = "icons/evilcraft.png"
+categories = ["utility"]
+tags = ["port", "horizon"]
+
+[[versions]]
+version = "0.1.0"
+published = "2026-11-10"
+game = "26.3"
+file = "evilcraft.hnmod"
+sha256 = "d24d6d108667832d4653d1ec0d70d0374d38d22c279ee5de38f0f5eab3e4e12e"
+changelog = "First release"

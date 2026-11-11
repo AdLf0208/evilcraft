@@ -1,0 +1,13 @@
+[package]
+# Ported from: EvilCraft 1.2.100 (CyclopsMC/EvilCraft, MIT), Minecraft Java 1.21.1
+# NeoForge. Local-only until the maintainer approves publishing.
+name = "horizon-evilcraft"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "EvilCraft for Horizon: the blood repair loop (extractor, blood chest)"
+
+[lib]
+# This exact source is also injected as a same-crate module by horizon-mixins.
+path = "mixins/evilcraft/runtime.rs"

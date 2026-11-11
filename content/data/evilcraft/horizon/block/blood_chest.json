@@ -1,0 +1,11 @@
+{
+  "item": true,
+  "properties": {
+    "explosion_resistance": 2.5,
+    "hardness": 2.5,
+    "map_color": 13,
+    "requires_tool": true,
+    "sounds": "minecraft:oak_planks"
+  },
+  "template": "minecraft:furnace"
+}
