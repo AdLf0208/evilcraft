@@ -1,9 +1,19 @@
-# EvilCraft for Horizon — slice 1: the blood repair loop
+# EvilCraft — a Horizon port
 
-Ported from **EvilCraft 1.2.100** (`evilcraft`, MIT, CyclopsMC/EvilCraft) for
-Minecraft Java 26.3 on Horizon.
+**EvilCraft** is a Minecraft mod. An evil mod for Minecraft. This repository is a **port of it to [Horizon](https://github.com/horizon-rust/horizon)**, the Rust engine for Minecraft Java 26.3. It carries the complete source of the port plus the content files it ships, and installs as a single `.hmod` package.
 
-## What this slice implements
+Upstream: [CyclopsMC/EvilCraft](https://github.com/CyclopsMC/EvilCraft) — licence **MIT**.
+
+| | |
+|---|---|
+| Upstream mod | EvilCraft ([source](https://github.com/CyclopsMC/EvilCraft)) |
+| Ported to | Horizon 0b14f8a, Minecraft Java 26.3, mod API `0.2` |
+| Package | `evilcraft.hmod` (install it with the Horizon launcher) |
+| Licence | **MIT** — the upstream mod's licence; see [Licence and credit](#licence-and-credit) |
+
+## What this port implements
+
+### What this slice implements
 
 - **Blood Extractor** (`evilcraft:blood_extractor`): a container for 5,000 mB of blood
   that fills when the player's melee kills a mob — `floor(hp × 5)` to
@@ -16,40 +26,47 @@ Minecraft Java 26.3 on Horizon.
 Both halves ship in the single `.hmod`: one package carries the block, the item, the menu
 type and the code, so installing one file gives the content and the behaviour.
 
-## What it does not
+## Not yet ported
 
-No recipes (their ingredients are other machines and ores), no curse roll, no BER
-chest model, no projectile-kill blood, and none of the rest of the jar (blood stains,
-the colossal chest, the infuser, the purifier, dark ore, undead wood, spirits,
-werewolves, promises). See `notes.md` for the full gap list and the deviations
-(blood is a tank id, the extractor's blood lives in the stack's `custom_data`).
+- **Recipes are not carried.** `blood_chest` needs `evilcraft:blood_infusion_core`
+- **The curse roll is not applied.** `randomBadEnchants = true`,
+- **The BER chest model is not carried.** `RenderBlockEntityBloodChest` draws a
+- **Projectile kills give no blood.** Upstream hears any player kill whose damage
+- **`evilcraft:copy_tank_data`** (the loot function that carries the tank into the
+- **The tank holds blood only by convention.** `block_entity_accepts_fluid` is not
+- **No blood stain, colossal chest, purifier, blood infuser, dark ore, undead wood,
+- **`/evilcraft blood|damage|held` are harness commands**, not upstream features
 
-## Building
+## Installing
 
-The port is the flat SDK package (`api = "0.2"`, `[native]` at nightly `0b14f8a`):
+1. Install the [Horizon launcher](https://github.com/horizon-rust/horizon/releases) (0.2.70 or newer).
+2. Add `evilcraft.hmod` to the instance's mods.
+3. The package is pinned to a specific Horizon build; the launcher checks that pin.
 
-```sh
-cargo horizon-mod build     # run in this folder: target/horizon-mod/evilcraft.hmod
-cargo horizon-mod check evilcraft.hmod
-cargo horizon-mod fits evilcraft.hmod
+## Licence and credit
+
+EvilCraft was created by its upstream authors; the code, models and assets in the original mod
+remain theirs and are used here under **MIT**. The Rust in this repository is a clean-room
+rewrite for Horizon, not a translation of the original source.
+
+- `LICENSE` — the upstream licence text.
+- `LICENSE-NOTICE.md` — what this port carries and where it came from.
+- The upstream project: https://github.com/CyclopsMC/EvilCraft
+
+## Technical details
+
+```
+horizon-mod.toml   package manifest (id, version, api, [native] pin)
+Cargo.toml         the crate; depends on `horizon-mod-api` from the fetched SDK
+src/               lib.rs (the one `impl Hooks`), runtime.rs (pure logic + tests), glue
+assets/ data/      the content the package ships
+tools/             content generators and the e2e scenario
 ```
 
-Through the campaign's build registry:
+- Build: `cargo horizon-mod build` (packages; it does not compile against the game).
+- Test: `cargo test`, `cargo clippy --all-targets -- -D warnings`.
+- In-game: `ports/tools/launcher-game.sh run evilcraft` in the campaign tree, or install the
+  `.hmod` and play; the harness scenario is `tools/e2e.sh`.
 
-```sh
-BUILD_LOCAL=1 ports/tools/build-slot.sh run --job sdk-ec --port ports/evilcraft --step check -- \
-    bash -lc 'cd ports/evilcraft && cargo horizon-mod check evilcraft.hmod'
-```
-
-The deliverable is `evilcraft.hmod` in this folder. `cargo horizon-mod build` writes it under
-`target/`, which is disposable — copy it here after a build, and take the size and SHA-256 from
-`cargo horizon-mod check evilcraft.hmod` (the recorded pair is in `notes.md` and `VALIDATION.md`;
-it moves whenever a packed file, this README included, changes). 
-`tools/horizon.py`, `tools/package.py`, `tools/package.sh` and `tools/assemble_content.py`
-belong to the retired `.hnmod` format and are kept only as history.
-
-## Licence
-
-The upstream mod is MIT; its `LICENSE` is kept here, and the two carried textures and
-the two item/block names come from the jar (`FINDINGS.md` records the SHA-1). Local
-only until the maintainer approves publishing.
+This repository is generated from the campaign's port at `ports/evilcraft/`; the port's own
+`notes.md` is the full record (decisions, traps, evidence).
