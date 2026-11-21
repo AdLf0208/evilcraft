@@ -16,16 +16,16 @@
 use mod_api::{
     self, BlockEntityEvent, BlockEntityPart, BlockEntityRef, BlockEntityTickEvent,
     BlockEntityTicksEvent, BlockPart, ClientHost, Command, CommandArgumentValue, CommandInvocation,
-    CommandSource, Component, Compound, Flow, Host, HostTransaction, Identifier, ItemPart,
-    ItemPlace, ItemStack, LevelRef, LevelSide, MobKilledEvent, ModContainer, ModFluidTanks,
-    RandomSource, RegisterCommandsEvent, RunModCommandEvent, Screen, ScreenDrawEvent, ScreenEvent,
-    ServerHost, Tag, Text, TooltipEvent,
+    CommandSource, Component, Compound, EntityRef, Flow, Host, HostTransaction, Identifier,
+    ItemPart, ItemPlace, ItemStack, LevelRef, LevelSide, LivingDeathEvent, ModContainer,
+    ModFluidTanks, PlayerRef, RandomSource, RegisterCommandsEvent, RunModCommandEvent, Screen,
+    ScreenDrawEvent, ScreenEvent, ServerHost, Tag, Text, TooltipEvent,
 };
 
 use crate::runtime::{
-    BLOOD, CHEST_SLOTS, CONTAINER_SLOT, EXTRACTOR, EXTRACTOR_CAPACITY, SLOT_COUNT, TANK_CAPACITY,
-    anvil_step, blood_from_kill, can_hold, drain_container, fill_extractor, kill_span, repair,
-    repair_due,
+    BLOOD, CHEST_SLOTS, CONTAINER_SLOT, Credit, EXTRACTOR, EXTRACTOR_CAPACITY, SLOT_COUNT,
+    TANK_CAPACITY, anvil_step, blood_from_kill, can_hold, drain_container, fill_extractor,
+    kill_span, repair, repair_due,
 };
 
 /// The block entity type: a bare name, so the mod's namespace qualifies it.
@@ -219,16 +219,57 @@ pub fn tanks() -> ModFluidTanks {
 // The extractor: kill blood
 // ---------------------------------------------------------------------------
 
-/// The player's blow killed mob `event.entity` (`mob_killed`): the kill is worth
-/// `floor(hp x 5) .. floor(hp x 40)` mB, which every Blood Extractor the player
-/// carries takes, one at a time, until it is spent.
-pub fn on_kill(host: &mut dyn ServerHost, event: &MobKilledEvent<'_>) {
-    let Some(player) = host.player(event.player) else {
+/// A mob or player is about to die (`living_death`, NeoForge's `LivingDeathEvent`): the
+/// extractors the player credited with the kill carries take the victim's blood.
+///
+/// This is upstream's own event: `ItemBloodExtractor.bloodObtainEvent` asks whether the
+/// killing blow's damage source names a `ServerPlayer`, so a player's arrow counts and a
+/// skeleton's arrow does not. The pin's `mob_killed` heard melee, sweep and spear only
+/// (gap 4), and its kill-credit step (`loot_drops`) runs too late to write a player's
+/// inventory: a fill made there is gone by the next read (measured — the hook's own re-read
+/// saw the new stack, `/evilcraft held` read 0 afterwards). `living_death` is the moment
+/// the blow is still live and a write lands.
+pub fn on_living_death(host: &mut dyn ServerHost, event: &mut LivingDeathEvent<'_>) {
+    let (credit, player) = credit(host, event.source.causing);
+    if !credit.fills() {
+        return;
+    }
+    let Some(player) = player else {
         return;
     };
     let Some(health) = max_health(host, event.entity) else {
         return;
     };
+    fill_for(host, player, health);
+}
+
+/// The credit a death carries and the player it names, if any, from the killing blow's
+/// causing entity: upstream's answer (`getSource().getEntity()`), resolved through the
+/// server's own entities. A skeleton's arrow names the skeleton, `/kill` names nobody.
+fn credit(host: &mut dyn ServerHost, causing: i32) -> (Credit, Option<PlayerRef>) {
+    let Some(entity) = u32::try_from(causing)
+        .ok()
+        .filter(|id| *id != 0)
+        .and_then(|id| host.entity(id))
+    else {
+        return (Credit::Nobody, None);
+    };
+    match player_at(host, entity) {
+        Some(player) => (Credit::Player, Some(player)),
+        None => (Credit::Nobody, None),
+    }
+}
+
+/// The server player behind `entity`, if it is one.
+fn player_at(host: &mut dyn ServerHost, entity: EntityRef) -> Option<PlayerRef> {
+    host.players()
+        .server_players()
+        .into_iter()
+        .find(|player| player.entity() == entity)
+}
+
+/// Fill the extractors `player` carries from the blood of a mob of `health` maximum health.
+fn fill_for(host: &mut dyn ServerHost, player: PlayerRef, health: f32) {
     let Some(level) = player.level(host) else {
         return;
     };
@@ -495,10 +536,15 @@ fn held(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandI
             }
             let filled = with_extractor_blood(&stack, amount);
             match player.set_inventory_slot(host, slot, Some(filled)) {
-                Ok(()) => say(
-                    host,
-                    format!("Blood Extractor held: {amount}/{EXTRACTOR_CAPACITY} mB."),
-                ),
+                Ok(()) => {
+                    let time = game_time(host, *player);
+                    say(
+                        host,
+                        format!(
+                            "Blood Extractor held: {amount}/{EXTRACTOR_CAPACITY} mB, t={time}."
+                        ),
+                    );
+                }
                 Err(_) => say(host, "the held stack could not be written.".to_owned()),
             }
         }
@@ -516,12 +562,23 @@ fn held(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandI
                 return;
             }
             let blood = extractor_blood(&stack);
+            let time = game_time(host, *player);
             say(
                 host,
-                format!("Blood Extractor held: {blood}/{EXTRACTOR_CAPACITY} mB."),
+                format!("Blood Extractor held: {blood}/{EXTRACTOR_CAPACITY} mB, t={time}."),
             );
         }
     }
+}
+
+/// The player's level's game time, so a `/evilcraft held` reply can never equal the
+/// previous one: the harness reads the newest chat line and a fixed wait once read a stale
+/// readout (the infuser's `t=` exists for the same reason).
+fn game_time(host: &mut dyn ServerHost, player: PlayerRef) -> i64 {
+    player
+        .level(host)
+        .and_then(|level| level.game_time(host))
+        .unwrap_or(0)
 }
 
 /// The mod block entity at `pos` in the command source's level, or a line saying it is

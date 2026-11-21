@@ -194,3 +194,30 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 5/5 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 4 (0.2.4) — projectile kills give blood, `living_death`
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 4**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`.
+
+| Step | Command | Result |
+|---|---|---|
+| tests (red) | `cargo test` with `Credit::fills` stubbed | **FAILED 1/36** (`sdk-test-red-slice4.log`) |
+| tests (green) | `cargo test` | **36 passed, 0 failed** (`sdk-test.log`) |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings (`sdk-clippy.log`) |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 467 API uses, 14 hooks, exit 0 |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **172,019 B** `a6632c3c…90b8`, `CMP-IDENTICAL`, 62 entries, no `Cargo.lock` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-1/0a875da…/e59da909…`, same sha |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` | exit 0 — `0a875da  made for` (`sdk-fits.log`) |
+| fits (another build) | `… --build 0b14f8a` | exit 0 — `0b14f8a  fits` (`sdk-fits.log`) |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** |
+
+| Leg | Log | Verdict |
+|---|---|---|
+| default (Q a bow kill fills, R a skeleton's arrow does not, plus the 0.2.3 leg) | `e2e-launcher.log` | `PASS` + `EXIT:0` |
+| control (no package) | `e2e-launcher-control.log` | `FAIL` + `EXIT:1` |
+| selftest (slice 1, C) | `e2e-launcher-selftest.log` | `FAIL` + `EXIT:1` |
+| selftest (this slice, Q) | `e2e-launcher-selftest-blood.log` | `FAIL` + `EXIT:1` |
+
+`check-e2e-logs.py evilcraft-e2e --strict` → `logs=6 ok=6` exit 0.

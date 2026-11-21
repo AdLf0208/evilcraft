@@ -8,17 +8,18 @@
 //!
 //! The blood chest is a block entity Part (its slots, tank, tick and screen), the
 //! extractor an item Part (its tooltip); the kill, the two machines' drops and the
-//! harness commands are global hooks. The mod keeps no state of its own: the tank lives
-//! in the block entity's saved compound, the extractor's blood in the stack's components,
-//! and a broken machine's tank travels on its own item as
-//! `minecraft:block_entity_data` ([`tank`]).
+//! harness commands are global hooks. A kill is heard on `living_drops` — every cause of
+//! death, so an arrow counts — and only when its damage source's causing entity is a
+//! player. The mod keeps no state of its own: the tank lives in the block entity's saved
+//! compound, the extractor's blood in the stack's components, and a broken machine's tank
+//! travels on its own item as `minecraft:block_entity_data` ([`tank`]).
 pub mod blood;
 pub mod infuser;
 pub mod runtime;
 pub mod tank;
 
 use mod_api::{
-    self, BlockDropsEvent, Flow, Hooks, LevelHost, MobKilledEvent, RegisterCommandsEvent,
+    self, BlockDropsEvent, Flow, Hooks, LevelHost, LivingDeathEvent, RegisterCommandsEvent,
     Registrar, RegistrationContext, RunModCommandEvent, ServerHost,
 };
 
@@ -76,10 +77,12 @@ impl Hooks for Mod {
         tank::on_drops(level, event)
     }
 
-    /// `player`'s blow killed a mob: the extractors the player carries take its blood
-    /// (upstream's `ItemBloodExtractor.fillForAllBloodExtractors`).
-    fn mob_killed(&self, host: &mut dyn ServerHost, event: &mut MobKilledEvent<'_>) {
-        blood::on_kill(host, event);
+    /// A mob or player died: the extractors the player credited with the kill carries take
+    /// its blood (upstream's `ItemBloodExtractor.fillForAllBloodExtractors`, on the same
+    /// `LivingDeathEvent`; a mob's or the environment's kill is not the player's).
+    fn living_death(&self, host: &mut dyn ServerHost, event: &mut LivingDeathEvent<'_>) -> Flow {
+        blood::on_living_death(host, event);
+        Flow::Continue
     }
 
     /// `/evilcraft info|blood|damage|held`, the harness commands (upstream has none).

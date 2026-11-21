@@ -540,7 +540,7 @@ the phase failed on exactly that), and it now proves **both** machines' loot tab
 | jar recipes for `blood_chest` / `blood_extractor` / `blood_infusion_core` | not ported | their ingredients (`hardened_blood_shard`, `dark_gem`, `dark_spike`, `dark_power_gem`) are not carried yet — gap 1 |
 | 31 of the jar's 40 infuser recipes | not ported | their input or output is an evilcraft item this package does not carry; two are unreachable upstream (defects below) |
 | `copy_tank_data` (the tank in the dropped block) | tested | O/P (6,500 mB broken, carried, re-placed; an empty chest carries nothing; a 20,000 mB payload clamps to 10,000) — slice 3 |
-| projectile kills giving blood | not ported | `mob_killed` at this pin hears melee, sweep and spear (gap 4) |
+| projectile kills giving blood | **tested** | Q (slice 4: `living_death` credits the player's causing entity; a skeleton's arrow does not) |
 | curse roll on repair | not ported | gap 2 (unchanged) |
 | `experience` on infusion | not ported | upstream stores `xp` and drops it when the result is taken; a mod content menu has no slot-take hook to hang that on (deviation 1) |
 | worldgen (dark ore) | blocked(configured-feature-not-registered) | mod worldgen is inert at `0a875da` (HANDOVER §9d 19) — not spent on |
@@ -830,6 +830,176 @@ item state a listener-less break leaves behind, and `SELFTEST=tank` is the asser
 |---|---|---|
 | `copy_tank_data` on `blood_chest` and `blood_infuser` | **tested** | O (6,500 mB in, 6,500 on the item, 6,500 back after placing), P (empty → nothing; 20,000 → 10,000 in the readout *and* in the saved data) |
 | the container's stacks on a broken machine | **tested (the opposite)** | O: the cobblestone in slot 0 spills as its own item entity, the payload has no `Items`, the replaced chest's slots are empty |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 4 — projectile kills give blood (2026-11-21)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.4**.
+The registry entry, the PR and the ledger stay the orchestrator's.
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap 4, unchanged since:
+
+> **Projectile kills give no blood.** Upstream hears any player kill whose damage source names the
+> player (arrows included); the pin's `mob_killed` hook hears melee, sweep and spear only.
+
+Upstream's rule is `ItemBloodExtractor.bloodObtainEvent(LivingDeathEvent)`: if
+`event.getSource().getEntity() instanceof ServerPlayer`, every extractor that player carries takes
+`floor(hp × 5) .. floor(hp × 40)` mB. **`living_death` is that same event at this pin** — NeoForge's
+`LivingDeathEvent`, with the source's causing/direct ids and the weapon — so the fill moved there.
+One hook hears every cause of death, so a melee kill cannot be double-filled (phase E is the
+regression guard).
+
+**Tier:** `deep` still governs the port; this slice is a `logic` family inside it — one listener on an
+existing death moment, no block, machine, entity or renderer.
+
+### Why not `loot_drops` (the shape the brief named), measured
+
+`loot_drops` **does** carry the credit (`damage_source.causing` resolves to the player for a bow
+kill — a temporary marker proved the rule reached its last step), but **a player-inventory write made
+there does not survive the call**: the hook's own re-read saw the written stack, and `/evilcraft held`
+read 0 afterwards. The write is inside the loot roll; `living_death` runs before the loot, where the
+same write lands. (It is also the event upstream listens to.) Evidence in the job's probe runs.
+
+Two further harness facts this cost, both recorded below: the pin captures a death's killing blow
+only for a mod listening on `living_death`/`loot_drops`, and a player **switched** from survival to
+creative no longer keeps a death-hook inventory write.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Listener | `Hooks::living_death` → `runtime::killer`/`Credit`: the source's **causing** entity resolved through `host.entity`/`host.players`, a player's blow or arrow credited, a mob's arrow/fall/`/kill` not | `ItemBloodExtractor.bloodObtainEvent`, `LivingDeathEvent` |
+| Rule | `runtime::Credit::{Player, Nobody}` + `Credit::fills` (the only credit that fills) | same |
+| Harness | `/evilcraft held` replies end in `t=<game time>`, so a readout can never equal the previous one | the infuser's readout had the same fault |
+
+`runtime::blood_from_kill`/`fill_extractor`/`kill_span` are unchanged; the amount is still
+`floor(hp × 5) + nextInt(max(1, floor(hp × 40) − floor(hp × 5)))` on the level's random.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice4.log` (the three credit tests written, `Credit::fills` stubbed to `false`):
+
+```
+test result: FAILED. 35 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+---- runtime::tests::a_players_word_or_arrow_kill_fills_the_extractor stdout ----
+thread 'runtime::tests::a_players_word_or_arrow_kill_fills_the_extractor' (545841) panicked at src/runtime.rs:449:9:
+assertion failed: Credit::Player.fills()
+```
+
+Green: `sdk-test.log` — **36 passed, 0 failed**; `sdk-clippy.log` — `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 1/36** (`EXIT:101`) | `sdk-test-red-slice4.log` |
+| tests (green) | `cargo test` | **36 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 467 API uses, 14 hooks, `EXIT:0` | `sdk-build-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **172,019 B**, sha256 `a6632c3c…90b8`, `CMP-IDENTICAL`, 62 entries, no `Cargo.lock` | `sdk-build-check.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-build-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8a` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | job report |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-cc7e9092a372`/`…155194bd99f7`, with
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/` and `horizon-mod.toml` are byte-identical
+to the port (`diff -r`/`cmp` empty, `version = "0.2.4"`), so the game ran the sources this package is
+built from.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1 OLD_GAME=<0.2.3 export>`) | **`PASS` + `EXIT:0`** (A, A2, B–F, H–R) | `e2e-launcher.log` |
+| control (no package at all) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C (*the pickaxe was not repaired … damage 218*) | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=blood` | **`FAIL` + `EXIT:1`** at Q (*a bow kill filled 0 mB, expected at least 100*) | `e2e-launcher-selftest-blood.log` |
+| selftest (slice 2, 0.2.3) | `SELFTEST=infuser` | **`FAIL` + `EXIT:1`** at K — kept as history | `e2e-launcher-selftest-infuser.log` |
+| selftest (slice 3, 0.2.3) | `SELFTEST=tank` | **`FAIL` + `EXIT:1`** at O — kept as history | `e2e-launcher-selftest-tank.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=6 ok=6 missing-exit=0
+bad-exit=0` (exit 0).
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== Q: a bow kill fills the carried extractor (every cause of death, the player's) ==
+  the carried bow killed the zombie at 206.5,101,10.5
+  Blood Extractor held: 541/5000 mB, t=8779.
+  a 20 HP zombie killed by an arrow filled the carried extractor with 541 mB
+== R: a skeleton's arrow kills the same mob and fills nothing (the kill's differential) ==
+  Arrow has the following entity data: {NoGravity: 1b, Motion: [0.0d, 0.0d, 0.0d], damage: 100.0d, Owner: [I; -1676472134, 1616924017, -1795264654, 1366240336], …}
+  Blood Extractor held: 0/5000 mB, t=8912.
+  the skeleton's arrow killed the zombie and the extractor stayed at 0 mB
+```
+
+and the previous package's leg, first in the same run (`== the previous package (0.2.3): the same bow
+kill fills nothing ==`): `Blood Extractor held: 0/5000 mB.` after the same bow kill.
+
+**Fail-capable, three ways.** (1) `SELFTEST=blood` inverts Q's assertion and exits 1. (2) Phase R is
+the rule's differential on the same extractor and the same mob: a lethal arrow whose `Owner` is read
+back as the skeleton's UUID kills the zombie and leaves the extractor at 0, so only a *player's*
+causing entity fills. (3) The whole-package control (`CONTROL=1`) fails at phase A's first check, and
+the **previous package** (0.2.3, the launcher's export kept as `evilcraft-0.2.3`) runs the same bow
+kill in the same run and reads 0 — the gap this slice closes.
+
+### Harness facts learned here
+
+1. **`loot_drops` cannot write a player's inventory at this pin.** A fill made there is visible to a
+   re-read inside the hook and gone by the next tick. `living_death` (before the loot) lands.
+2. **The pin only captures a mob's killing blow for a mod listening on `living_death`/`loot_drops`.**
+   A port that registers only a later hook sees deaths with no source (the arena's `/kill` deaths
+   still reach them, with a generic source and no player).
+3. **A player switched from survival to creative stops keeping a death hook's inventory write.**
+   Measured: the same bow kill filled 266 mB (creative from launch), 598 mB (survival), and 0 after a
+   `gamemode survival` → `gamemode creative` switch. The kill phases therefore run in survival, where
+   arrows are consumed and 32 are given (`arm_bow`), with Resistance 5 so the AI mob cannot kill the
+   player mid-phase.
+4. **A mob needs AI for projectile damage.** `NoAI:1b` freezes it so completely that an arrow does
+   nothing (20 HP stays 20); melee still lands. Phase Q's target is an AI zombie; phase E's (melee)
+   stays frozen.
+5. **A skeleton's own arrow can be summoned**: `summon minecraft:arrow … {NoGravity:1b,Owner:<skeleton
+   UUID int-array>,damage:100.0}`; `data get entity` reads `Owner` back for the assertion, then
+   `data merge entity … {Motion:[-2.0,0,0]}` sends it. A frozen (`NoAI`) zombie takes no projectile
+   damage, so the target zombie is AI.
+6. **`/evilcraft held` now ends in `t=<game time>`**: the harness reads the newest chat line, and a
+   readout that can repeat its exact text made a fixed wait read the previous one (the infuser's
+   readout had the same fault in slice 2).
+
+### Deviations this slice adds
+
+1. **The fill is on `living_death`, not `loot_drops`** (see above). The credit rule is unchanged:
+   upstream's causing entity. A tame wolf's kill credits the wolf (not its owner), as upstream does;
+   a player killed by a player fills the killer's extractor, also as upstream's event would.
+2. **The random is the level's, not the player's** (`player.getRandom()` upstream) — unchanged from
+   slice 1, recorded there.
+3. **No Vein Sword boost.** Upstream multiplies the span by `ItemVeinSwordConfig.extractionBoost` when
+   the killing player holds an `ItemVeinSword`; the port does not carry that item, so no boost.
+
+### Upstream defects fixed
+
+None new. (`copy_tank_data`'s applier, the shadowed leather recipe and the 25,000 mB recipe are the
+earlier slices'.)
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| a **projectile** kill by the player (arrow) fills the carried extractor | **tested** | Q: a 20 HP zombie at range, 32 arrows, 541 mB (100..799 asserted) |
+| a **mob's** projectile kill fills nothing | **tested** | R: a skeleton's arrow (its `Owner` read back) kills the zombie, extractor 0 |
+| the previous package (0.2.3) on the same bow kill | **tested (the gap)** | the run's first leg: 0 mB |
+| melee kills still fill (the regression guard) | **tested** | E: 100..799 (unchanged phase) |
+| `/kill` and the environment fill nothing | **tested** | R's `/kill` cleanup + phase C's empty-tank control; unit `the_environment_and_kill_command_fill_nothing` |
+| projectile kills giving blood | **tested** | Q (was `not ported`) |
 
 ### Skills
 

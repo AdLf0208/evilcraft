@@ -52,6 +52,18 @@
 #     doctored to 20,000 mB (`give … Amount:20000`) places a chest clamped to
 #     10,000 mB both in `/evilcraft info` and in the block entity's own `fluids`.
 #
+# Slice 4 — projectile kills give blood (`loot_drops`, upstream's
+# `event.getSource().getEntity() instanceof ServerPlayer`):
+#  Q  a 20 HP zombie spawned at range is killed with the player's bow: the carried
+#     extractor takes its 100..799 mB (before this slice an arrow kill filled nothing,
+#     because `mob_killed` heard melee, sweep and spear only);
+#  R  the same extractor, emptied, stays empty when the zombie is killed by a *skeleton's*
+#     arrow: the arrow's `Owner` is read back as the skeleton's UUID, the zombie dies, and
+#     no player credit means no blood (the rule that excludes a mob's kill).
+# The previous package (0.2.3) is the third leg: the same bow kill with the same package's
+# `/evilcraft held` reads 0 mB, which is the gap this slice closes. `OLD_GAME` names that
+# game (the launcher's export of the 0.2.3 build).
+#
 # The operator gate on `/evilcraft info|infuser` is unit-tested
 # (`the_readout_needs_an_operator_and_names_only_this_chest`) and registered at level 2;
 # its in-game leg needs a LAN guest at level 0 (`lan open 0`), because an integrated
@@ -63,15 +75,16 @@
 # (`ports/tools/launcher-game.sh run evilcraft` supplies it, with `CTL`, `CONTROL_GAME`
 # and `RES`); there is no `--dev-mod` any more.
 #
-# CONTROL=1 (the launcher run sets `CONTROL_GAME`) first launches the same Nightly
-# **without** the package, where the ids must be unknown.
+# CONTROL=1 (the launcher exports `CONTROL_GAME`) runs the whole scenario on the same Nightly
+# **without** the package, where the chest item never registers and the run must fail.
 #
-# SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's and SELFTEST=tank flips O's
-# (each must FAIL), proving the scenarios can fail. Phase I is the infuser's own
-# differential: the same machine, the same bone and a full tank do nothing at tier 0 and
-# infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing in its
-# tank drops an item that carries no payload, which is exactly what a break the listener
-# never hears leaves behind.
+# SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's and
+# SELFTEST=blood flips Q's (each must FAIL), proving the scenarios can fail. Phase I is the
+# infuser's own differential: the same machine, the same bone and a full tank do nothing at
+# tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
+# in its tank drops an item that carries no payload, which is exactly what a break the listener
+# never hears leaves behind. Phase R is the kill's differential: the same extractor, the same
+# mob and a lethal arrow, whose shooter is a skeleton rather than the player.
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${EC_DEBUG:-}" ] || set -x
@@ -84,12 +97,17 @@ PIN_BIN=$CLONE/ports/_shared/bin/horizon-1d63e0a5
 CTL=${CTL:-}
 GAME=${GAME:-}
 CONTROL_GAME=${CONTROL_GAME:-}
+# The launcher's export of the previous package (0.2.3): the bow-kill counterfactual.
+OLD_GAME=${OLD_GAME:-${GAME:+$(dirname "$GAME")/../evilcraft-0.2.3/horizon-client}}
 RES=${RES:-${HORIZON_RES:-/home/adlf/Desktop/horizon/.local/horizon-client/26.3}}
 SOCK=${SOCK:-/tmp/opencode/evilcraft-e2e.sock}
 SELFTEST=${SELFTEST:-0}
+# The previous package's leg runs with the default scenario only (it is a second launch and
+# the control/selftest logs are about their own phases).
+OLD=${OLD:-$([ "$SELFTEST" = 0 ] && [ "${CONTROL:-0}" = 0 ] && echo 1 || echo 0)}
 KEEP=${KEEP:-0}
 WORLD=EvilCraftE2E
-CONTROL_WORLD=EvilCraftControl
+OLD_WORLD=EvilCraftOld
 # Where the arena stands: the End's void, far from the central island.
 X0=200
 SX=$((X0 + 2))
@@ -218,34 +236,6 @@ place_chest() { # place_chest X Y Z [ITEM]
 give_to() { # give_to X Y Z ITEM
     ctl container "$1" "$2" "$3" "$4" 1 >/dev/null
     ctl wait 6 >/dev/null
-}
-
-# The control: the same Nightly, unmodified (the launcher exports it as
-# `CONTROL_GAME`), so the only difference is the package. Both ids must be unknown.
-control_leg() {
-    echo "== control: the same Nightly without this package =="
-    launch "$CONTROL_WORLD" "$CONTROL_GAME"
-    arena
-    ctl command "item replace entity @s hotbar.0 with $CHEST 1" >/dev/null 2>&1 || true
-    ctl wait 4 >/dev/null
-    ctl inventory | jq -e --arg i "$CHEST" '[.hotbar[], .main[] | select(.item == $i)] | length == 0' >/dev/null \
-        || fail "the control game has the chest item, so the package was in it"
-    ctl command "item replace entity @s hotbar.0 with $INFUSER 1" >/dev/null 2>&1 || true
-    ctl wait 4 >/dev/null
-    ctl inventory | jq -e --arg i "$INFUSER" '[.hotbar[], .main[] | select(.item == $i)] | length == 0' >/dev/null \
-        || fail "the control game has the infuser item, so the package was in it"
-    ctl command "execute in minecraft:the_end run setblock $SX 101 0 $CHEST" >/dev/null 2>&1 || true
-    ctl wait 4 >/dev/null
-    local name
-    name=$(block_name "$SX" 101 0)
-    [ "$name" = "minecraft:air" ] || fail "the control game holds $name, so the block id was known"
-    ctl command "execute in minecraft:the_end run setblock $IX 101 0 $INFUSER" >/dev/null 2>&1 || true
-    ctl wait 4 >/dev/null
-    local machine
-    machine=$(block_name "$IX" 101 0)
-    [ "$machine" = "minecraft:air" ] || fail "the control game holds $machine, so the infuser id was known"
-    echo "  without the package: no chest or infuser item, both blocks stayed $name / $machine"
-    ctl quit >/dev/null 2>&1 || true
 }
 
 # Open a machine's menu and check the slot count of the mod's own slots (300+).
@@ -442,10 +432,120 @@ saved_tank() { # x y z
     echo "  $line" >&2
 }
 
+# `/evilcraft held`, waiting for the *new* reply: the chat is read newest first, so a fixed
+# wait can read the previous readout (the infuser's readout had the same fault). Sets
+# `HELD_BLOOD`.
+held_blood() { # [what]
+    local what=${1:-held} prev line i
+    prev=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'Blood Extractor held' || true)
+    say "evilcraft held"
+    line=$prev
+    for i in $(seq 1 25); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'Blood Extractor held' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] || fail "no /evilcraft held reply for the $what extractor"
+    HELD_BLOOD=$(sed -n 's/.*held: \([0-9][0-9]*\)\/[0-9][0-9]* mB.*/\1/p' <<<"$line")
+    [ -n "$HELD_BLOOD" ] || fail "the held line did not parse: $line"
+    echo "  $line" >&2
+}
+
+# Carry a bow (hotbar 1), arrows (hotbar 2) and a Blood Extractor (hotbar 9), bow in hand.
+arm_bow() {
+    ctl command "clear @s" >/dev/null
+    ctl command "item replace entity @s hotbar.0 with minecraft:bow 1" >/dev/null
+    ctl command "item replace entity @s hotbar.1 with minecraft:arrow 32" >/dev/null
+    ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+    ctl wait 4 >/dev/null
+    ctl select 1 >/dev/null
+    ctl wait 2 >/dev/null
+    [ "$(ctl inventory | jq -r '.held.item')" = "minecraft:bow" ] \
+        || fail "the bow is not in hand: $(ctl inventory | jq -r '.held.item')"
+    # Resistance 5 (no damage) for the whole kill: the mob has AI and walks in, and a
+    # survival player must not die to it mid-phase.
+    ctl effect minecraft:resistance 120 4 >/dev/null 2>&1 || true
+}
+
+# One zombie at x,101,z, killed with the held bow: aim and fire until it is gone. The mob
+# must have AI: `NoAI:1b` freezes it so completely that a projectile's damage never lands
+# (measured on this pin: the same arrow kills an AI zombie and leaves a frozen one at 20 HP).
+kill_with_bow() { # x z
+    local x=$1 z=$2 i id zombies
+    ctl command "execute in minecraft:the_end run tp @s $(( ${x%%.*} - 6 )).5 101 $(( ${z%%.*} + 0 )).5" >/dev/null
+    ctl wait 6 >/dev/null
+    ctl command "execute in minecraft:the_end run kill @e[type=minecraft:zombie]" >/dev/null
+    for i in $(seq 1 20); do
+        zombies=$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')
+        [ "$zombies" = 0 ] && break
+        ctl wait 4 >/dev/null
+    done
+    [ "$zombies" = 0 ] || fail "the arena still holds $zombies zombies, so the target is ambiguous"
+    ctl summon minecraft:zombie "$x" 101 "$z" >/dev/null || fail "cannot summon a zombie at $x,101,$z"
+    ctl wait 8 >/dev/null
+    id=$(ctl entities 20 minecraft:zombie | jq -r '.entities[0].id // ""')
+    [ -n "$id" ] || fail "the zombie is not among the entities: $(ctl entities 20 | jq -c '.entities[0:3]')"
+    # A fresh zombie carries 20 HP: the readout prints it as `20.0`, so compare numerically.
+    [ "$(ctl entities 20 minecraft:zombie | jq -r '.entities[0].health == 20')" = true ] \
+        || fail "the summoned zombie has $(ctl entities 20 minecraft:zombie | jq -r '.entities[0].health') HP, expected a fresh 20"
+    for i in $(seq 1 8); do
+        id=$(ctl entities 20 minecraft:zombie | jq -r '.entities[0].id // ""')
+        [ -n "$id" ] || break
+        ctl look-at-entity "$id" >/dev/null 2>&1 || true
+        ctl use-item --hold 1.2 >/dev/null 2>&1 || true
+        ctl wait 10 >/dev/null
+    done
+    [ "$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')" = 0 ] \
+        || fail "the zombie survived eight arrows: $(ctl entities 20 | jq -c '.entities[0:3]')"
+    echo "  the carried bow killed the zombie at $x,101,$z" >&2
+}
+
+# `data get entity` on the newest arrow, waiting for the *new* reply (chat is newest first).
+# Sets `ARROW_LINE`.
+arrow_line() {
+    local prev line i
+    prev=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 '^Arrow has the following entity data' || true)
+    ctl command "data get entity @e[type=minecraft:arrow,limit=1]" >/dev/null
+    line=$prev
+    for i in $(seq 1 25); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 '^Arrow has the following entity data' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] || fail "no /data get reply for the arrow"
+    ARROW_LINE=$line
+    echo "  $ARROW_LINE" >&2
+}
+
+# The previous package (0.2.3): the same bow kill must leave the extractor empty. That is the
+# gap this slice closes — a build whose `mob_killed` hears melee, sweep and spear only never
+# sees an arrow's kill.
+old_leg() {
+    echo "== the previous package (0.2.3): the same bow kill fills nothing =="
+    [ -x "$OLD_GAME" ] || fail "OLD_GAME is not a game: '$OLD_GAME'"
+    launch "$OLD_WORLD" "$OLD_GAME"
+    arena
+    arm_bow
+    kill_with_bow 206.5 10.5
+    ctl select 9 >/dev/null
+    ctl wait 4 >/dev/null
+    held_blood "0.2.3 package"
+    [ "$HELD_BLOOD" = 0 ] \
+        || fail "the 0.2.3 package filled the extractor with $HELD_BLOOD mB from a bow kill, so this leg does not show the gap"
+    echo "  0.2.3: the same bow kill left the extractor at $HELD_BLOOD mB"
+    ctl quit >/dev/null 2>&1 || true
+    sleep 1
+}
+
 echo "== launch (The End arena, content + native bundle) =="
 if [ "$CONTROL" = 1 ]; then
+    # The control: the whole scenario on the same Nightly **without** the package, where
+    # the chest item never registers and the run must fail at phase A's first check.
     [ -n "$CONTROL_GAME" ] || { echo "CONTROL=1 needs CONTROL_GAME" >&2; exit 2; }
-    control_leg
+    GAME=$CONTROL_GAME
+fi
+if [ "$OLD" = 1 ]; then
+    old_leg
 fi
 launch
 arena
@@ -814,4 +914,85 @@ saved_tank "$PX" 101 -12
     || fail "the placed chest's own tank holds $SAVED_MB mB, expected the clamped $TANK_CAPACITY"
 echo "  20,000 mB asked by the item, $TANK mB in the machine (saved $SAVED_MB)" >&2
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, and a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks), places back with 6,500 mB, while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000"
+echo "== Q: a bow kill fills the carried extractor (every cause of death, the player's) =="
+# Phase N left the player in survival, and this phase stays there: a survival kill is the
+# real thing (arrows are consumed, 32 are given), and a player who was *switched* from
+# survival to creative no longer keeps an inventory write a death hook makes (measured on
+# this pin: the same bow kill filled 266 mB in a creative-from-launch player, 598 in
+# survival, and 0 after a survival -> creative switch).
+# A survival player is the real case (and the only one whose death-hook write lands after
+# phase N's switch): ask the game itself, in the player's own selector.
+ctl command "execute if entity @s[gamemode=survival] run say EC_SURVIVAL" >/dev/null
+ctl wait 6 >/dev/null
+ctl messages 8 | jq -r '.chat[]' | grep -q 'EC_SURVIVAL' \
+    || fail "the player is not in survival, so the survival kill leg proves nothing"
+arm_bow
+kill_with_bow 206.5 10.5
+ctl select 9 >/dev/null
+ctl wait 6 >/dev/null
+held_blood "bow kill"
+BOW_BLOOD=$HELD_BLOOD
+if [ "$SELFTEST" = blood ]; then
+    echo "(selftest=blood: asserting the arrow kill filled nothing)"
+    BOW_BLOOD=0
+fi
+[ "$BOW_BLOOD" -ge 100 ] || fail "a bow kill filled $BOW_BLOOD mB, expected at least 100"
+[ "$BOW_BLOOD" -le 799 ] || fail "a bow kill filled $BOW_BLOOD mB, expected at most 799"
+echo "  a 20 HP zombie killed by an arrow filled the carried extractor with $BOW_BLOOD mB"
+
+echo "== R: a skeleton's arrow kills the same mob and fills nothing (the kill's differential) =="
+# The same extractor, emptied: an arrow whose shooter is a mob is a death without player
+# credit. Upstream asks `event.getSource().getEntity() instanceof ServerPlayer`, and this
+# pin's `loot_drops` names the source's causing entity — so the zombie dies and the
+# extractor stays at 0.
+say "evilcraft held 0"
+ctl wait 12 >/dev/null
+ctl command "execute in minecraft:the_end run kill @e[type=minecraft:arrow]" >/dev/null
+ctl command "execute in minecraft:the_end run kill @e[type=minecraft:zombie]" >/dev/null
+ctl command "execute in minecraft:the_end run kill @e[type=minecraft:skeleton]" >/dev/null
+ctl wait 10 >/dev/null
+ctl command "execute in minecraft:the_end run tp @s 200.5 101 10.5" >/dev/null
+ctl wait 6 >/dev/null
+ctl command "execute in minecraft:the_end run summon minecraft:skeleton 212.5 101 10.5" >/dev/null
+ctl wait 8 >/dev/null
+ctl command "data get entity @e[type=minecraft:skeleton,limit=1] UUID" >/dev/null
+ctl wait 10 >/dev/null
+SKEL_LINE=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'Skeleton has the following entity data: \[I;' || true)
+[ -n "$SKEL_LINE" ] || fail "no skeleton UUID reply: $(ctl messages 6 | jq -c '.chat')"
+SKEL_UUID=$(sed -n 's/.*entity data: \(.*\)$/\1/p' <<<"$SKEL_LINE")
+[ -n "$SKEL_UUID" ] || fail "the skeleton UUID did not parse: $SKEL_LINE"
+# Step out of the skeleton's reach first: a skeleton targets players, and this leg is about
+# its arrow hitting a *mob*, not about the player surviving a volley. The arrow keeps the
+# skeleton's UUID as its `Owner` wherever the player stands.
+ctl effect minecraft:resistance 120 4 >/dev/null 2>&1 || true
+ctl command "execute in minecraft:the_end run tp @s 200.5 101 -8.5" >/dev/null
+ctl wait 8 >/dev/null
+# An AI target: a frozen mob never takes a projectile's damage at this pin.
+ctl command "execute in minecraft:the_end run summon minecraft:zombie 206.5 101 10.5" >/dev/null
+ctl wait 6 >/dev/null
+ZOMBIES=$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')
+[ "$ZOMBIES" = 1 ] || fail "the arena holds $ZOMBIES zombies, expected 1: $(ctl entities 20 | jq -c '.entities[0:3]')"
+# The arrow is the skeleton's: its own UUID is in the arrow's saved `Owner`, read back
+# before it is sent at the zombie, so the leg is about a mob's arrow and not about an
+# ownerless one.
+ctl command "execute in minecraft:the_end run summon minecraft:arrow 210.5 102 10.5 {NoGravity:1b,Owner:$SKEL_UUID,Motion:[0.0,0.0,0.0],damage:100.0}" >/dev/null \
+    || fail "cannot summon the skeleton's arrow"
+ctl wait 4 >/dev/null
+arrow_line
+grep -qF "Owner: $SKEL_UUID" <<<"$ARROW_LINE" \
+    || fail "the arrow is not the skeleton's: expected Owner $SKEL_UUID, read '$ARROW_LINE'"
+ctl command "data merge entity @e[type=minecraft:arrow,limit=1] {Motion:[-2.0,0.0,0.0]}" >/dev/null \
+    || fail "the skeleton's arrow does not fly"
+for _ in $(seq 1 20); do
+    ctl wait 4 >/dev/null
+    [ "$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')" = 0 ] && break
+done
+[ "$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')" = 0 ] \
+    || fail "the skeleton's arrow did not kill the zombie: $(ctl entities 20 | jq -c '.entities[0:3]')"
+ctl wait 6 >/dev/null
+held_blood "skeleton-arrow"
+[ "$HELD_BLOOD" = 0 ] \
+    || fail "a skeleton's arrow filled the extractor with $HELD_BLOOD mB, so a mob's kill was credited to the player"
+echo "  the skeleton's arrow killed the zombie and the extractor stayed at $HELD_BLOOD mB"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, and a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks), places back with 6,500 mB, while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000"

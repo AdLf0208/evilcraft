@@ -1,6 +1,6 @@
 id = "evilcraft"
 name = "EvilCraft"
-version = "0.2.3"
+version = "0.2.4"
 description = """A port of EvilCraft's blood economy for Horizon: the Blood Extractor fills with
 the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), the Blood Infuser spends
 that blood infusing an item into another (a bone into a blaze rod, sand into soul sand, and the

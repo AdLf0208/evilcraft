@@ -247,6 +247,28 @@ pub fn restored_tank(carried: i32) -> i32 {
     carried.clamp(0, TANK_CAPACITY)
 }
 
+/// Who a mob's death is credited to, as the extractor's rule reads it.
+///
+/// Upstream (`ItemBloodExtractor.bloodObtainEvent`) fills only when the killing blow's
+/// damage source names a `ServerPlayer` as its causing entity: a player's melee blow and a
+/// player's arrow do, a skeleton's arrow does not (its causing entity is the skeleton), and
+/// neither do a fall, lava, the void or `/kill`, whose source names no entity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Credit {
+    /// A player is credited with the kill.
+    Player,
+    /// Nobody is: a mob's blow or arrow, the environment, `/kill`.
+    Nobody,
+}
+
+impl Credit {
+    /// Whether this death fills the killer's extractors: only a player's kill does.
+    #[must_use]
+    pub fn fills(self) -> bool {
+        matches!(self, Self::Player)
+    }
+}
+
 /// Empty a blood container into the chest's tank, never past its capacity.
 /// Returns `(tank, what the container keeps)`.
 #[must_use]
@@ -414,6 +436,28 @@ mod tests {
         assert_eq!(restored_tank(-1), 0);
         assert_eq!(restored_tank(0), 0);
         assert_eq!(restored_tank(6_500), 6_500);
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 4: a projectile kill fills the extractor (`living_drops`)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_players_word_or_arrow_kill_fills_the_extractor() {
+        // The death is credited to the player who swung or fired.
+        assert!(Credit::Player.fills());
+    }
+
+    #[test]
+    fn a_mobs_arrow_kills_but_fills_nothing() {
+        // The same shape with the credit on a skeleton: a death, not the player's.
+        assert!(!Credit::Nobody.fills());
+    }
+
+    #[test]
+    fn the_environment_and_kill_command_fill_nothing() {
+        // A fall, lava, the void, `/kill`: the source names no causing entity.
+        assert!(!Credit::Nobody.fills());
     }
 
     // -----------------------------------------------------------------------
