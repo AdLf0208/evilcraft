@@ -1,15 +1,16 @@
 [package]
-# Port of EvilCraft 1.21.1-1.2.100 (CyclopsMC/EvilCraft, MIT), Minecraft Java 1.21.1
+# Port of EvilCraft 1.21.1-1.2.100 (CyclopsMC/EvilCraft; the release's README grants
+# CC BY 4.0 to all code and images, its build metadata MIT), Minecraft Java 1.21.1
 # NeoForge; the port targets Horizon 26.3 at the pins in horizon-mod.toml.
 # Clean-room Rust rewrite from the mod's behaviour (FINDINGS.md); local-only until
-# publishing is approved, publishable under MIT with this source.
+# publishing is approved, publishable under CC BY 4.0 with this source and attribution.
 #
 # Cargo's name and version are not the mod's identity: horizon-mod.toml is.
 name = "evilcraft"
-version = "0.2.0"
+version = "0.2.2"
 edition = "2024"
-license = "MIT"
-description = "EvilCraft for Horizon: the blood repair loop (extractor, blood chest)"
+license = "CC-BY-4.0"
+description = "EvilCraft for Horizon: the blood loop (extractor, infuser, blood chest)"
 publish = false
 
 [dependencies]

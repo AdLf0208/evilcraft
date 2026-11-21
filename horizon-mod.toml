@@ -1,22 +1,25 @@
 id = "evilcraft"
 name = "EvilCraft"
-version = "0.2.0"
+version = "0.2.2"
 description = """A port of EvilCraft's blood economy for Horizon: the Blood Extractor fills with
-the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), and the Blood Chest
-spends that blood to repair the ten damaged items in its slots, one damage point every two ticks
-for 5 mB, with a broken anvil stepping back to a whole one for 125 mB."""
+the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), the Blood Infuser spends
+that blood infusing an item into another (a bone into a blaze rod, sand into soul sand, and the
+mod's own recipes as data), and the Blood Chest spends it to repair the ten damaged items in its
+slots, one damage point every two ticks for 5 mB, with a broken anvil stepping back to a whole one
+for 125 mB."""
 authors = ["rubensworks (kroeser)", "AdLf0208"]
 # A native mod: Rust in src/, compiled by the launcher against the game build [native] pins,
 # beside data/ and assets/. The id is the resource namespace and the only identity.
 api = "0.2"
-# An integrated server belongs to the client installation, so a LAN host and single player
-# need both sides; the chest's screen is the client half.
+# An integrated server belongs to the client installation, so a LAN host and single
+# player need both sides; the two machines' screens are the client half.
 side = "both"
-# "May add blocks, items, mob effects and entity types to your worlds": the chest block, the
-# extractor item and the chest's block entity, menu type and creative tab.
+# "May add blocks, items, mob effects and entity types to your worlds": the chest and infuser
+# blocks, the extractor and the tier promises, their block entities and menu types, the two
+# machines' recipe type and the creative tab.
 capabilities = ["registries"]
 
 [native]
 game = "26.3"
-horizon = "0b14f8acfd97fa2c750e42795249dcc981178ca4"
+horizon = "0a875da91dbb0fdcb7ba8c42c11341aa229af51a"
 mixins = "e59da9094f0c2fdda6c627fe9eff22dec6a906f0"

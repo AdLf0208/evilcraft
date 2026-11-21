@@ -4,8 +4,8 @@
 The `.hmod` is what players download, and the licence above requires its notice to
 travel with copies of the work. A mod's carried files are `assets/` and `data/`, plus
 the root files the packer takes, so the notice rides as data the game ignores:
-`data/evilcraft/license/license.txt` and `data/evilcraft/license/notice.txt`, written from
-the repository's `LICENSE` and `LICENSE-NOTICE.md`. Rerun after any licence change;
+`data/evilcraft/license/license.txt` (CC BY 4.0), `…/license-mit.txt` (the MIT grant) and
+`…/notice.txt`, written from the repository's `LICENSE`, `LICENSE-MIT` and `LICENSE-NOTICE.md`. Rerun after any licence change;
 `cargo horizon-mod build` packs whatever is there.
 """
 from pathlib import Path
@@ -14,7 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "data" / "evilcraft" / "license"
 
 OUT.mkdir(parents=True, exist_ok=True)
-for source, name in (("LICENSE", "license.txt"), ("LICENSE-NOTICE.md", "notice.txt")):
+for source, name in (
+    ("LICENSE", "license.txt"),
+    ("LICENSE-MIT", "license-mit.txt"),
+    ("LICENSE-NOTICE.md", "notice.txt"),
+):
     text = (ROOT / source).read_text()
     (OUT / name).write_text(text)
     print(f"wrote {OUT / name}")

@@ -1,5 +1,12 @@
 {
   "block.evilcraft.blood_chest": "Blood Chest",
+  "block.evilcraft.blood_infuser": "Blood Infuser",
   "item.evilcraft.blood_extractor": "Blood Extractor",
+  "item.evilcraft.promise_tier_1": "Promise of Tenacity I",
+  "item.evilcraft.promise_tier_1.info": "Machine tier upgrade, also usable for lower tier recipes.",
+  "item.evilcraft.promise_tier_2": "Promise of Tenacity II",
+  "item.evilcraft.promise_tier_2.info": "Machine tier upgrade, also usable for lower tier recipes.",
+  "item.evilcraft.promise_tier_3": "Promise of Tenacity III",
+  "item.evilcraft.promise_tier_3.info": "Machine tier upgrade, also usable for lower tier recipes.",
   "itemGroup.evilcraft": "EvilCraft"
 }

@@ -11,6 +11,7 @@
 //! global hooks. The mod keeps no state of its own: the tank lives in the block
 //! entity's saved compound and the extractor's blood in the stack's components.
 pub mod blood;
+pub mod infuser;
 pub mod runtime;
 
 use mod_api::{
@@ -25,7 +26,8 @@ struct Mod;
 #[mod_api::horizon_mod]
 impl Hooks for Mod {
     /// Once, at startup: the chest's block entity type and Part, the chest's storage
-    /// and menu, and the extractor's Part.
+    /// and menu, the extractor's Part, and the infuser's type, Part, storage, tank and
+    /// recipe type.
     fn register(&self, r: &mut dyn Registrar, _cx: &RegistrationContext) {
         let chest = r.block_key(runtime::CHEST);
         let kind = r
@@ -38,6 +40,26 @@ impl Hooks for Mod {
         r.block_fluids(&chest, blood::tanks());
         let extractor = r.item_key(runtime::EXTRACTOR);
         r.item_part(extractor, blood::Extractor);
+
+        // The Blood Infuser: its own block entity type and Part, its seven slots, its
+        // tank, and the recipe type its data files are written in. The recipe type must
+        // be declared before its serializer, which is what makes the engine keep the
+        // `evilcraft:blood_infuser` files and publish them to `recipes_of_type`.
+        let infuser = r.block_key(runtime::INFUSER);
+        let kind = r
+            .block_entity_type(infuser::INFUSER_ENTITY)
+            .blocks(&[infuser::INFUSER_BLOCK])
+            .build();
+        r.block_entity_part(&kind, infuser::Infuser)
+            .expect("evilcraft declares the blood infuser's own block entity type");
+        r.block_container(&infuser, infuser::container());
+        r.block_fluids(&infuser, infuser::tanks());
+        r.register_recipe_type(runtime::INFUSION_TYPE);
+        // The serializer's **name is the recipe file's `type`**: the engine looks the file
+        // up by it, so it is the same id upstream registers its `RecipeSerializer` under.
+        // The recipe type it belongs to is the same string, as in vanilla (`minecraft:smelting`
+        // is both), which is what `recipes_of_type` reads.
+        r.register_raw_recipe_serializer(runtime::INFUSION_TYPE, runtime::INFUSION_TYPE);
     }
 
     /// `player`'s blow killed a mob: the extractors the player carries take its blood

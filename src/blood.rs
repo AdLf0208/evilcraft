@@ -32,6 +32,8 @@ use crate::runtime::{
 pub const CHEST_ENTITY: &str = "blood_chest";
 /// The block the type belongs to, as the declaration builder takes it.
 pub const CHEST_BLOCK: &str = "blood_chest";
+/// The Blood Chest's full block id, as `Level::block` names it.
+const CHEST_ID: &str = "evilcraft:blood_chest";
 
 /// The menu type the content declares (`data/evilcraft/horizon/menu/blood_chest_menu.json`).
 const MENU: &str = "evilcraft:blood_chest_menu";
@@ -87,10 +89,18 @@ impl BlockEntityPart for Chest {
         // The container slot empties a blood container into the tank, as upstream's
         // `EmptyFluidContainerInTankTickAction` does.
         if let Some(container) = entity.items[CONTAINER_SLOT].take() {
+            // The container stays in its slot once emptied, as upstream's
+            // `EmptyFluidContainerInTankTickAction` leaves it; the old code dropped the
+            // extractor item when its last blood went into the tank. Any other item is
+            // left exactly as it was: only an extractor carries blood.
+            let extractor = container.item().id(host) == EXTRACTOR;
             let (filled, keeps) = drain_container(tank, extractor_blood(&container));
             tank = filled;
-            entity.items[CONTAINER_SLOT] =
-                (keeps > 0).then(|| with_extractor_blood(&container, keeps));
+            entity.items[CONTAINER_SLOT] = Some(if extractor {
+                with_extractor_blood(&container, keeps)
+            } else {
+                container
+            });
         }
         let ticks = read_int(&entity.nbt, TICKS).unwrap_or(0).max(0) as u32;
         if repair_due(ticks) {
@@ -273,9 +283,13 @@ fn max_health(host: &dyn Host, entity: u32) -> Option<f32> {
 /// The commands (`register_commands`). Upstream has none: they exist so the harness
 /// can read and set a chest without a GUI (precedent: `/charginggadgets info|energy`).
 pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
-    event
-        .commands
-        .push(Command::new("evilcraft info <pos:block_pos>"));
+    // The readout names the chest's container slot, its ten slots' damage and its tank
+    // anywhere in the level, so it is registered at the operator level `/data get block`
+    // needs (2, game master) and its body asks again before reading anything.
+    event.commands.push(Command::op(
+        "evilcraft info <pos:block_pos>",
+        OPERATOR_LEVEL,
+    ));
     event.commands.push(Command::op(
         "evilcraft blood <pos:block_pos> <amount:integer>",
         2,
@@ -284,13 +298,25 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         "evilcraft damage <pos:block_pos> <slot:integer> <amount:integer>",
         2,
     ));
+    // The infuser's readout and its slot loader: the machine's own menu is the player's
+    // route, these let a scenario read and feed it without a GUI.
+    event.commands.push(Command::op(
+        "evilcraft infuser <pos:block_pos>",
+        OPERATOR_LEVEL,
+    ));
+    // `<id:id>` is a free `namespace:path` identifier: a `word` argument stops at the
+    // colon (the campaign's `item`-argument trap, so no `item` kind here).
+    event.commands.push(Command::op(
+        "evilcraft load <pos:block_pos> <slot:integer> <id:id>",
+        2,
+    ));
     event.commands.push(Command::new("evilcraft held"));
     event
         .commands
         .push(Command::op("evilcraft held <amount:integer>", 2));
 }
 
-/// `/evilcraft info|blood|damage|held` (`run_mod_command`).
+/// `/evilcraft info|blood|damage|infuser|load|held` (`run_mod_command`).
 pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
     let source = event.source;
     let invocation = event.command;
@@ -301,10 +327,12 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
         "info" => info(host, source, invocation),
         "blood" => set_blood(host, source, invocation),
         "damage" => set_damage(host, source, invocation),
+        "infuser" => crate::infuser::readout(host, source, invocation),
+        "load" => crate::infuser::load(host, source, invocation),
         "held" => held(host, source, invocation),
         _ => say(
             host,
-            "usage: /evilcraft info|blood|damage|held ...".to_owned(),
+            "usage: /evilcraft info|blood|damage|infuser|load|held ...".to_owned(),
         ),
     }
     Flow::Cancel
@@ -312,6 +340,13 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
 
 /// `/evilcraft info <pos>`: the tank, the container slot and every chest slot's damage.
 fn info(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandInvocation) {
+    if !may_read(source.permission()) {
+        say(
+            host,
+            format!("evilcraft info needs an operator (permission level {OPERATOR_LEVEL})"),
+        );
+        return;
+    }
     let Some(pos) = block_pos(invocation) else {
         say(host, "usage: /evilcraft info <x> <y> <z>".to_owned());
         return;
@@ -320,7 +355,7 @@ fn info(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandI
         return;
     };
     let Some(data) = entity.data(host) else {
-        say(host, format!("{pos:?} is not a mod block entity."));
+        say(host, format!("{pos:?} is not a Block Chest."));
         return;
     };
     let tank = read_tank(&data);
@@ -353,8 +388,8 @@ fn info(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandI
     );
 }
 
-/// `/evilcraft blood <pos> <amount>`: set the chest's tank, for a scenario that cannot
-/// wait for a kill.
+/// `/evilcraft blood <pos> <amount>`: set a machine's tank, for a scenario that cannot
+/// wait for a kill or a fill.
 fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandInvocation) {
     let Some(pos) = block_pos(invocation) else {
         say(
@@ -370,7 +405,7 @@ fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
         );
         return;
     };
-    let Some(entity) = mod_entity(host, source, pos) else {
+    let Some(entity) = either_machine(host, source, pos) else {
         return;
     };
     let amount = amount.clamp(0, TANK_CAPACITY);
@@ -382,10 +417,10 @@ fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
         let _ = entity.set_data_slots(host, vec![amount, TANK_CAPACITY]);
         say(
             host,
-            format!("Blood Chest at {pos:?}: {amount}/{TANK_CAPACITY} mB."),
+            format!("Blood machine at {pos:?}: {amount}/{TANK_CAPACITY} mB."),
         );
     } else {
-        say(host, format!("{pos:?} is not a blood chest."));
+        say(host, format!("{pos:?} has no blood tank."));
     }
 }
 
@@ -496,14 +531,59 @@ fn mod_entity(
     source: &CommandSource,
     pos: [i32; 3],
 ) -> Option<BlockEntityRef> {
+    our_entity(host, source, pos, CHEST_ID, "Block Chest")
+}
+
+/// The mod block entity `block` stands at `pos`, or a line saying the position is not
+/// one of `noun`'s.
+///
+/// The diagnostic reads a machine's slots and tank, so it answers only for this mod's own
+/// blocks: any other block entity's saved data (another mod's machine, a vanilla chest
+/// with a name) is not this port's to report.
+pub(crate) fn our_entity(
+    host: &mut dyn ServerHost,
+    source: &CommandSource,
+    pos: [i32; 3],
+    block: &str,
+    noun: &str,
+) -> Option<BlockEntityRef> {
     let Some(level) = level_of(host, source) else {
         say(host, "evilcraft: no level is open here.".to_owned());
         return None;
     };
+    let ours = level
+        .block(host, pos)
+        .is_some_and(|key| key.id(host) == block);
     match host.block_entity(level, pos) {
-        Some(entity) if entity.data(host).is_some() => Some(entity),
+        Some(entity) if ours && entity.data(host).is_some() => Some(entity),
         _ => {
-            say(host, format!("{pos:?} is not a mod block entity."));
+            say(host, format!("{pos:?} is not a {noun}."));
+            None
+        }
+    }
+}
+
+/// The mod machine at `pos`, chest or infuser: the two blocks share the tank command.
+fn either_machine(
+    host: &mut dyn ServerHost,
+    source: &CommandSource,
+    pos: [i32; 3],
+) -> Option<BlockEntityRef> {
+    let Some(level) = level_of(host, source) else {
+        say(host, "evilcraft: no level is open here.".to_owned());
+        return None;
+    };
+    let ours = level.block(host, pos).is_some_and(|key| {
+        let id = key.id(host);
+        id == CHEST_ID || id == crate::infuser::INFUSER_ID
+    });
+    match host.block_entity(level, pos) {
+        Some(entity) if ours && entity.data(host).is_some() => Some(entity),
+        _ => {
+            say(
+                host,
+                format!("{pos:?} is not a Blood Chest or a Blood Infuser."),
+            );
             None
         }
     }
@@ -512,15 +592,25 @@ fn mod_entity(
 /// The level a command acts in: the runner's own, else the overworld (the console's
 /// execution level in vanilla). The commands name a position, never a dimension, as
 /// the harness ran them before the merge.
-fn level_of(host: &mut dyn ServerHost, source: &CommandSource) -> Option<LevelRef> {
+pub(crate) fn level_of(host: &mut dyn ServerHost, source: &CommandSource) -> Option<LevelRef> {
     match source {
         CommandSource::Player { player, .. } => player.level(host),
         _ => host.level("minecraft:overworld"),
     }
 }
 
+/// The level `/evilcraft info` is registered at: 2, the game master level `/data get block`
+/// needs.
+pub(crate) const OPERATOR_LEVEL: u8 = 2;
+
+/// Whether a command source may read a chest's contents: an operator, or the console (which
+/// always carries level 4).
+pub(crate) fn may_read(permission: mod_api::PermissionLevel) -> bool {
+    permission.level() >= OPERATOR_LEVEL
+}
+
 /// The `pos` argument of a command, resolved by the dispatcher against the source.
-fn block_pos(invocation: &CommandInvocation) -> Option<[i32; 3]> {
+pub(crate) fn block_pos(invocation: &CommandInvocation) -> Option<[i32; 3]> {
     match invocation.argument("pos")? {
         CommandArgumentValue::BlockPos(pos) => Some(*pos),
         _ => None,
@@ -528,7 +618,7 @@ fn block_pos(invocation: &CommandInvocation) -> Option<[i32; 3]> {
 }
 
 /// The `amount`-style integer argument, absent when the usage left it out.
-fn integer(invocation: &CommandInvocation, name: &str) -> Option<i32> {
+pub(crate) fn integer(invocation: &CommandInvocation, name: &str) -> Option<i32> {
     match invocation.argument(name)? {
         CommandArgumentValue::Integer(value) => Some(*value),
         _ => None,
@@ -536,7 +626,7 @@ fn integer(invocation: &CommandInvocation, name: &str) -> Option<i32> {
 }
 
 /// A command's answer, routed to the source with vanilla's silence rules.
-fn say(host: &mut dyn ServerHost, line: String) {
+pub(crate) fn say(host: &mut dyn ServerHost, line: String) {
     let _ = host.commands().feedback(Text::literal(line));
 }
 
@@ -567,7 +657,7 @@ impl Component for CustomData {
 }
 
 /// The blood one Blood Extractor holds, from its `minecraft:custom_data`.
-fn extractor_blood(stack: &ItemStack) -> i32 {
+pub(crate) fn extractor_blood(stack: &ItemStack) -> i32 {
     let Some(data) = stack.get(&CustomData) else {
         return 0;
     };
@@ -579,7 +669,7 @@ fn extractor_blood(stack: &ItemStack) -> i32 {
 
 /// The same stack holding `amount` mB of blood; an empty extractor carries no data, so
 /// it stacks with a plain one.
-fn with_extractor_blood(stack: &ItemStack, amount: i32) -> ItemStack {
+pub(crate) fn with_extractor_blood(stack: &ItemStack, amount: i32) -> ItemStack {
     let mut one = stack.clone();
     if amount > 0 {
         let mut data = one.get(&CustomData).unwrap_or_default();
@@ -615,26 +705,26 @@ fn item_stack(host: &dyn Host, id: &str) -> Option<ItemStack> {
 // ---------------------------------------------------------------------------
 
 /// The tag saved under `name`, by the plain name the game's own readers use.
-fn field<'a>(nbt: &'a Compound, name: &str) -> Option<&'a Tag> {
+pub(crate) fn field<'a>(nbt: &'a Compound, name: &str) -> Option<&'a Tag> {
     nbt.iter()
         .find(|(key, _)| key.to_string_lossy() == name)
         .map(|(_, tag)| tag)
 }
 
-fn read_int(nbt: &Compound, name: &str) -> Option<i32> {
+pub(crate) fn read_int(nbt: &Compound, name: &str) -> Option<i32> {
     match field(nbt, name) {
         Some(Tag::Int(value)) => Some(*value),
         _ => None,
     }
 }
 
-fn write_int(nbt: &mut Compound, name: &str, value: i32) {
+pub(crate) fn write_int(nbt: &mut Compound, name: &str, value: i32) {
     nbt.insert(name.into(), Tag::Int(value));
 }
 
 /// The blood in the entity's first tank, in the pin's saved `fluids` shape. A tank
 /// holding another fluid, or nothing, reads as empty.
-fn read_tank(nbt: &Compound) -> i32 {
+pub(crate) fn read_tank(nbt: &Compound) -> i32 {
     let Some(Tag::List(list)) = field(nbt, FLUIDS) else {
         return 0;
     };
@@ -656,7 +746,7 @@ fn read_tank(nbt: &Compound) -> i32 {
 
 /// Write the first tank back in the pin's `fluids` shape, an empty tank as
 /// `minecraft:empty` so the tank's index stays in place.
-fn write_tank(nbt: &mut Compound, amount: i32) {
+pub(crate) fn write_tank(nbt: &mut Compound, amount: i32) {
     let amount = amount.clamp(0, TANK_CAPACITY);
     let mut entry = Compound::new();
     entry.insert(
@@ -665,4 +755,21 @@ fn write_tank(nbt: &mut Compound, amount: i32) {
     );
     entry.insert("Amount".into(), Tag::Int(amount));
     nbt.insert(FLUIDS.into(), Tag::List(vec![Tag::Compound(entry)]));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_readout_needs_an_operator_and_names_only_this_chest() {
+        use mod_api::PermissionLevel;
+        assert!(!may_read(PermissionLevel::All));
+        assert!(!may_read(PermissionLevel::Moderators));
+        assert!(may_read(PermissionLevel::Gamemasters));
+        assert!(may_read(PermissionLevel::Owners));
+        assert_eq!(OPERATOR_LEVEL, 2);
+        // The block the diagnostic answers for is the full id its own block registers.
+        assert_eq!(CHEST_ID, format!("evilcraft:{CHEST_BLOCK}"));
+    }
 }

@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft, slice 1: the blood repair loop
+# evilcraft — EvilCraft: the blood loop (slice 1: repair loop, slice 2: Blood Infuser)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -7,9 +7,13 @@
 > in [§ Migration to the SDK format](#migration-to-the-sdk-format-2026-11-18) at the foot.
 
 - **Mod:** EvilCraft (`evilcraft`), **content / deep**, core, priority **P0**.
-- **Licence:** **MIT**, read from the jar's `META-INF/neoforge.mods.toml`
-  (`license="MIT"`, `modId="evilcraft"`, `version="1.2.100"`). **Rank 0** (permissive).
-  Local-only until the maintainer approves publishing (ARCHITECTURE §8).
+- **Licence:** **CC BY 4.0** for all code and images — the exact release's own README
+  (`1.21.1-1.2.100`) says so — with **MIT** as the grant its build metadata declares
+  (`gradle.properties: license=MIT`, copied into the jar's `neoforge.mods.toml`). Resolved
+  2026-11-18 (review #1168): the README is the narrower grant and it covers the two carried
+  textures, so the port distributes under CC BY 4.0 with attribution, and keeps the MIT text
+  as `LICENSE-MIT`. **Rank 0** either way. Local-only until the maintainer approves
+  publishing (ARCHITECTURE §8).
 - **Ported from:** EvilCraft 1.2.100, Minecraft Java 1.21.1 NeoForge, author
   rubensworks (kroeser). Jar kept as evidence:
   `ports/_shared/licence-cache/evilcraft-1.21.1-neoforge-1.2.100.jar`
@@ -89,8 +93,9 @@ one at a time, until the amount is spent.
 ## Gaps (what this slice does not do)
 
 1. **Recipes are not carried.** `blood_chest` needs `evilcraft:blood_infusion_core`
-   (a Blood Infuser product) and `blood_extractor` needs `dark_spike` + `dark_gem`;
-   none of those are in this slice, so both items are creative-only for now.
+   (a crafted item, not an infusion) and `blood_extractor` needs `dark_spike` +
+   `dark_gem`; none of those are in this slice, so both items are creative-only for
+   now. Slice 2 adds the Blood Infuser that both hang off — see § **Slice 2**.
 2. **The curse roll is not applied.** `randomBadEnchants = true`,
    `randomBadEnchantsChance = 10000` is recorded in `runtime.rs`
    (`BAD_ENCHANT_CHANCE`) but adding an enchantment component is not implemented.
@@ -107,9 +112,11 @@ one at a time, until the amount is spent.
    stamped at this pin, so another mod's pipe can push water into the tank; the
    chest then reads 0 mB and repairs nothing until blood is put back (no data loss:
    the foreign fluid is left untouched).
-7. **No blood stain, colossal chest, purifier, blood infuser, dark ore, undead wood,
+7. **No blood stain, colossal chest, purifier, dark ore, undead wood,
    spirits/vengeance, werewolves, promises/bowls, brooms, or the environmental
-   accumulator** — the rest of the jar. `FINDINGS.md` lists the families.
+   accumulator** — the rest of the jar. `FINDINGS.md` lists the families. *(The Blood
+   Infuser was in this list and is carried as of slice 2 — see § Slice 2 below; the
+   promise items are carried as its upgrades only.)*
 8. **`/evilcraft blood|damage|held` are harness commands**, not upstream features
    (upstream has no commands at all in this area); they exist so the scenario can
    read and set a chest without a GUI.
@@ -151,7 +158,7 @@ Each item below is quoted from `ports/_shared/horizon-mods/reviews/pr-*-evilcraf
 - **Reviewer:** relative upstream link
   **Repair:** Already absolute (`https://github.com/CyclopsMC/EvilCraft`).
 - **Reviewer:** upstream permission unverified
-  **Repair:** `LICENSE-NOTICE.md` now records that the 1.21.1 jar's `META-INF/neoforge.mods.toml` declares `license="MIT"` and that the repository has no root licence file (hence GitHub's 404).
+  **Repair:** `LICENSE-NOTICE.md` now records that the 1.21.1 jar's `META-INF/neoforge.mods.toml` declares `license="MIT"`, that the exact release's README declares **CC BY 4.0 for all code and images**, and that the repository has no root licence file (hence GitHub's 404). Resolved again in the 2026-11-18 review-fix pass: the package distributes under CC BY 4.0, see [`## Review fixes (2026-11-18)`](#review-fixes-2026-11-18).
 - **Reviewer:** registry artifact delivery
   **Repair:** **Staging (orchestrator, not ours)**: the artifact is not in registry release/staging as `<sha256>.<ext>`; the orchestrator answers it with `horizon-mods#686` (no write access to the registry's releases). Every repackaged artifact below has a fresh sha256 for that re-push, and the author release must be re-uploaded from the port repository.
 
@@ -342,3 +349,281 @@ Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-de
 > `Registrar::block_fluids`/`block_container` declarations, and the AE2 content embedding is gone
 > because one `.hmod` carries the content and the code); `runtime.rs` and its tests unchanged
 > (17/17, byte-identical).
+
+## Review fixes (2026-11-18) — registry source review #1168
+
+Skills: superpowers/using-superpowers,systematic-debugging,test-driven-development,verification-before-completion; BeautifulRust/rust-best-practices
+
+File: `var/review-all/1168-evilcraft.md`. Package **0.2.1**, `evilcraft.hmod` 142,922 B, sha256
+`dc620c8b8de282fd8ee2edca590774059a5ffa53866477942035469ffd1cfb0c`.
+
+1. **Licence: MIT-only omitted the upstream README's CC BY 4.0 grant for code and images.**
+   Resolved from the artefacts: the exact tag `1.21.1-1.2.100`'s `README.md` says *"All code and
+   images are licenced under Creative Commons 4 (CC BY 4.0)"*, its `gradle.properties` says
+   `license=MIT`. The README is the narrower grant and it covers the two carried textures, so the
+   port now distributes under **CC BY 4.0** (`LICENSE` = the full CC BY 4.0 legal code) and keeps
+   the MIT text as `LICENSE-MIT`; `LICENSE-NOTICE.md` records both grants, the attribution
+   (rubensworks), the source tag and the changes. `tools/stamp_license.py` writes the three files
+   into `data/evilcraft/license/` so they travel inside the package. **Entry change is the
+   orchestrator's**: `license = "CC-BY-4.0"`.
+2. **`src/blood.rs:278` `/evilcraft info` read any block entity with saved data at any loaded
+   position (slots, damage, tank), and `mod_entity` accepted another mod's container.**
+   Fixed on both axes: `info` is declared `Command::op(…, 2)` (the level `/data get block` needs)
+   and its body re-checks `may_read(permission)`; `mod_entity` now requires the block at `pos` to
+   be `evilcraft:blood_chest` and answers *"is not a Block Chest"* otherwise. Pinned by
+   `the_readout_needs_an_operator_and_names_only_this_chest` (unit) and by the in-game phase
+   **A2** (a vanilla chest with a custom name is refused) and **G** (a de-opped player is refused,
+   the console re-ops). `cargo test`: **18 passed**.
+
+**Found by the in-game leg (fixed here, not in the reviewer's list).** The Blood Chest's tick
+`take()` the container slot and only wrote it back when blood remained, so a **fully drained
+extractor was destroyed** instead of staying in its slot (upstream's
+`EmptyFluidContainerInTankTickAction` leaves the container). The slot now keeps the item — an
+extractor rewritten empty, any other item untouched (its custom data is never touched) — and the
+e2e's phase F asserts `container evilcraft:blood_extractor@0` next to `tank 760`. The e2e also
+gained phase **A2** (a vanilla chest with saved data answers *is not a Block Chest*) and **G**
+(the de-opped player is refused). In-game: `PASS` + `E2E EXIT:0` (`evidence/evilcraft-e2e/`), the
+same command on the package-less Nightly `EXIT:1`.
+
+## Slice 2 — the Blood Infuser (2026-11-21)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. The port moves from
+`0b14f8a` to the campaign pin; `.horizon/sdk` was deleted and refetched (the tool prints `SDK 0a875da`).
+Package **0.2.2** — the form/PR discipline is the orchestrator's; this file records what the bytes are.
+
+### The gap this slice closes, and why this family
+
+From the slice-1 gap list (unchanged § *Gaps*, item 7):
+
+> No blood stain, colossal chest, **purifier, blood infuser**, dark ore, undead wood, spirits/vengeance,
+> werewolves, promises/bowls, brooms, or the environmental accumulator — the rest of the jar.
+
+The **Blood Infuser** is the jar's central blood machine: every other machine's inputs (the infusion
+core, the purifier, the promise chain) flow through it, and it is the only family in the remaining list
+that is *both* self-contained and provable in a game at this pin. It also closes the other half of gap
+1 for later slices: once `blood_infusion_core` exists, `blood_chest` and `blood_extractor` become
+craftable with the jar's own recipes (still not carried — see the gaps below).
+
+**Tier:** `deep` still governs the port; this slice is a `machines` family inside it — a block entity
+with slots and a tank, a content menu type, a custom recipe type read as data, and a tick. No entity,
+renderer or dimension, so it does not exceed the tier.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Block | `evilcraft:blood_infuser` — `facing`/`lit` from the `minecraft:furnace` template, `strength 2.5`, `SoundType.STONE`, `requiresCorrectToolForDrops` | jar block + `BlockBloodInfuser`, `BlockBloodInfuserConfig` |
+| Block entity | 7 slots (`SLOT_CONTAINER=0`, `SLOT_INFUSE=1`, `SLOT_INFUSE_RESULT=2`, 4 upgrade slots), a 10,000 mB blood tank, the infusion tick | `BlockEntityBloodInfuser` (`SLOTS`, `SLOT_*`, `LIQUID_PER_SLOT`) |
+| Menu | `evilcraft:blood_infuser_menu` — 7 slots, 3 data slots (tank, progress, duration) | `ContainerBloodInfuser` (3 machine slots + 4 upgrade slots) |
+| Recipe type | `evilcraft:blood_infuser`, read through `Host::recipes_of_type` — 9 of the jar's 40 files | `RecipeBloodInfuser`, `RecipeSerializerBloodInfuser` |
+| Tier upgrades | `evilcraft:promise_tier_1..3` (items, creative-only here) → the machine's tier | `ItemPromise`, `BlockEntityWorking.Metadata.getTier` |
+| Commands | `/evilcraft infuser <pos>`, `/evilcraft load <pos> <slot> <id>`, and `/evilcraft blood` now sets either machine's tank | harness only (upstream has no commands) |
+
+The tick is upstream's: `TickComponent` adds one to the action's tick, runs it, and resets at the
+recipe's `duration`; `InfuseItemTickAction.canTick` refuses while the tank cannot pay the recipe's
+`input_fluid.amount`, so a stalled machine loses its progress; the product joins the result slot (same
+item, room for `output_item.count`), one input leaves the infusion slot and the blood is drained once
+at completion. `RecipeBloodInfuser.matches` gates on `tier <= machine tier`, and the machine's tier is
+the promise in an upgrade slot — so with no promise the machine does nothing, which phase I proves.
+
+Carried recipes (the jar's `blood_infuser/convenience/` files whose ingredient and product are both
+items the game or this package has): `bone→blaze_rod` 2,500 mB/500 t, `wheat_seeds→nether_wart`
+5,000/1,000, `sand→soul_sand` 2,500/1,000, `dirt→grass_block` 350/300, `cobblestone→netherrack`
+500/500, `rotten_flesh→spider_eye` ×8 375/500, `brown_mushroom→red_mushroom` 2,000/150,
+`skeleton_skull→zombie_head` 1,000/500, `zombie_head→creeper_head` 5,000/1,000.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red.log` (a run with the tests written and `infusion_for`/`infuse_tick`/`machine_tier`/
+`decode_infusion` stubbed):
+
+```
+test result: FAILED. 20 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+---- runtime::tests::a_bone_becomes_a_blaze_rod_for_two_and_a_half_thousand_mb stdout ----
+thread 'runtime::tests::a_bone_becomes_a_blaze_rod_for_two_and_a_half_thousand_mb' (1320410) panicked at src/runtime.rs:357:64:
+a bone is infused
+---- runtime::tests::a_tier_three_recipe_needs_a_tier_three_machine stdout ----
+thread 'runtime::tests::a_tier_three_recipe_needs_a_tier_three_machine' (1320423) panicked at src/runtime.rs:388:9:
+assertion failed: infusion_for(&recipes, "minecraft:bone", 3).is_some()
+---- runtime::tests::a_tier_promise_is_the_machines_tier stdout ----
+thread 'runtime::tests::a_tier_promise_is_the_machines_tier' (1320422) panicked at src/runtime.rs:438:9:
+assertion `left == right` failed
+  left: 0
+ right: 1
+```
+
+Green: `sdk-test.log` — **26 passed, 0 failed**; `sdk-clippy.log` — `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (all in `build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 413 API uses, content accepted | `sdk-project-check.log` |
+| tests (red) | `cargo test` | **FAILED 6/26** | `sdk-test-red.log` |
+| tests (green) | `cargo test` | **26 passed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build` twice | **164,572 B**, sha256 `3c1dbf04…`, **`cmp` identical**, 61 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, **164,572 B**, sha256 `3c1dbf04…`, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8a` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** | report in the job |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`launcher-game.sh build evilcraft` → `native-0a875da-19366e9d0373`, with the log line
+`Compiling evilcraft (1 of 1)`; the export's `horizon-native-mods/evilcraft/{src,data}` and
+`horizon-mod.toml` are byte-identical to the port (`diff -r` empty, `cmp` empty) — the game ran the
+sources this package is built from.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` | **PASS + `EXIT:0`** (phases A, A2, B–F, H–N) | `e2e-launcher.log` |
+| control | `CONTROL=1 GAME=$CONTROL_GAME` | **FAIL + `EXIT:1`**: *without the package: no chest or infuser item, both blocks stayed `minecraft:air`* | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **FAIL + `EXIT:1`** at C (the pickaxe *was* repaired) | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=infuser` | **FAIL + `EXIT:1`** at K (the bone *was* infused) | `e2e-launcher-selftest-infuser.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=4 ok=4 missing-exit=0
+bad-exit=0`, exit 0.
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== H: the Blood Infuser's own recipe files load, and an unknown id is refused ==
+  Blood Infuser [206, 101, 0]: tank 0/10000 mB, tier 0, cont empty@0, in empty@0, out empty@0, progress 0, recipes 9/9
+  block evilcraft:blood_infuser, 9/9 recipe files in force
+  evilcraft:no_such_item is not an item this game has.
+== I: a tier-3 recipe waits for a tier-3 machine (the tier gate) ==
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 0, cont empty@0, in minecraft:bone@1, out empty@0, progress 0, recipes 9/9 t=…
+  560 ticks at tier 0: the bone is untouched, no product, 10000 mB left
+== J: the menu's seven slots, and the promise that tiers the machine ==
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 3, cont empty@0, in minecraft:bone@1, out empty@0, progress 17, recipes 9/9 t=…
+  the menu lists 7 slots; a Promise of Tenacity III in slot 303 makes the machine tier 3
+== K: the bone is infused into a blaze rod for 2,500 mB in 500 ticks ==
+  Blood Infuser [206, 101, 0]: tank 7500/10000 mB, tier 3, cont empty@0, in empty@0, out minecraft:blaze_rod@1, progress 0, recipes 9/9 t=…
+  500 ticks: tank 10000 -> 7500 mB, one blaze rod for one bone
+  took 1 x minecraft:blaze_rod out of the result slot into inventory slot 1
+== L: every other carried recipe is crafted the way its file declares ==
+  minecraft:rotten_flesh -> minecraft:spider_eye x8 for 375 mB in 500 ticks
+  took 8 x minecraft:spider_eye out of the result slot into inventory slot 6
+  … (all nine recipes assert product, count, consumed input and blood spent)
+== M: the container slot empties a filled extractor into the tank ==
+  extractor 1,000 mB -> tank 1000 mB, extractor 0 mB
+== N: both machines break into themselves (loot tables and the mineable tag) ==
+  evilcraft:blood_infuser: mined with a pickaxe, 1 on the ground, 0 picked up
+  evilcraft:blood_chest: mined with a pickaxe, 1 on the ground, 0 picked up
+```
+
+Phase I is the infuser's own differential: the same machine, the same bone, the same full tank and 560
+ticks produce nothing at tier 0 and one blaze rod for 2,500 mB once a tier-3 promise is in slot 303.
+Phase N is a survival break (a creative player's break drops nothing at this pin — the first version of
+the phase failed on exactly that), and it now proves **both** machines' loot tables and
+`minecraft:mineable/pickaxe` membership.
+
+### Coverage table (this package, family → proof)
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `blood_chest` block, item, menu, tank, repair tick | tested | A–D, F (slice 1, still green) |
+| `blood_extractor` item, kill fill, tooltip | tested | E, F |
+| `blood_infuser` block, menu (7 slots), tank, infusion tick | tested | H–M |
+| `evilcraft:blood_infuser` recipe type (9 files) | tested | L (nine recipes, product + count + input consumed + blood spent) |
+| tier gate (`RecipeBloodInfuser.matches` + `ItemPromise`) | tested | I (nothing at tier 0) vs J/K (infuses at tier 3) |
+| `promise_tier_1..3` items as upgrades | tested (as upgrades) | J, K, L |
+| loot tables + `minecraft:mineable/pickaxe` for both blocks | tested | N |
+| harness commands `info`, `blood`, `damage`, `infuser`, `load`, `held` | tested | A2, B, D, F, H, I, M |
+| `blood_stain`, `colossal_blood_chest`, `purifier`, `spirit_*`, `dark_tank`, `display_stand`, `environmental_accumulator`, `box_of_eternal_closure`, `entangled_chalice` | not ported | the rest of the jar's machinery (gap 7) |
+| dark ore / gems, undead wood, vengeance/spirits, werewolves, brooms, misc items | not ported | gap 7; dark ore would need worldgen, inert at this pin |
+| promise/bowl family (`bowl_of_promises_*`, `promise_acceptor_*`, speed/efficiency promises) | not ported | the promise items are carried as machine upgrades only; their crafting chain is a later slice |
+| jar recipes for `blood_chest` / `blood_extractor` / `blood_infusion_core` | not ported | their ingredients (`hardened_blood_shard`, `dark_gem`, `dark_spike`, `dark_power_gem`) are not carried yet — gap 1 |
+| 31 of the jar's 40 infuser recipes | not ported | their input or output is an evilcraft item this package does not carry; two are unreachable upstream (defects below) |
+| `copy_tank_data` (the tank in the dropped block) | not ported | `Hooks::block_drops` + `minecraft:block_entity_data` is the campaign's proven route (`rftoolsutility` 0.2.1) — the next slice |
+| projectile kills giving blood | not ported | `mob_killed` at this pin hears melee, sweep and spear (gap 4) |
+| curse roll on repair | not ported | gap 2 (unchanged) |
+| `experience` on infusion | not ported | upstream stores `xp` and drops it when the result is taken; a mod content menu has no slot-take hook to hang that on (deviation 1) |
+| worldgen (dark ore) | blocked(configured-feature-not-registered) | mod worldgen is inert at `0a875da` (HANDOVER §9d 19) — not spent on |
+
+### Deviations this slice adds
+
+1. **No experience.** Upstream `BlockEntityBloodInfuser.xp` accumulates the recipe's `xp` and the
+   result slot's `onTake` drops it at the player. The pin's content menu has no per-slot take callback
+   (a `MenuPart` click hook may exist later), so the port neither stores nor awards it; no gameplay
+   output is lost besides the points.
+2. **No speed/efficiency promises.** The four upgrade slots exist and only the three tier promises are
+   carried and read (the machine's tier). `promise_speed_*`/`promise_efficiency_*` are not carried, so
+   their multipliers are not modelled.
+3. **The tank is not resized by the tier.** Upstream multiplies the tank by the tier (`getTankTierMultiplier`,
+   `1 << (tier * 2)`; the lang says ×2/×4/×8). The port keeps 10,000 mB for every tier; every carried
+   recipe costs ≤ 5,000 mB, so nothing carried becomes unreachable.
+4. **`lit` is never set.** The furnace template's `lit` state exists (its blockstate maps both values to
+   the same model), but the tick does not flip it; upstream's `ON` property changes the model and the
+   light level. Same cosmetic gap as the chest's.
+5. **The tier is the highest promise anywhere in the upgrade slots.** Upstream refuses a second tier
+   promise and gates which slot each tier may sit in (`getRequiredTierForSlot`); the port reads the
+   highest of the four slots and does not police the index. One promise in any slot gives the same answer.
+6. **The result slot is not `SlotRemoveOnly`.** A content menu cannot refuse placement per slot, so a
+   player can put an item into the result slot; the machine will not overwrite it (the tick needs the
+   slot empty or holding the product) and a pipe cannot reach it (`outputs = [container, result]`,
+   `inputs = [container, infuse]`).
+7. **Nine of forty infuser recipes.** The rest name items this package does not carry; each carried file
+   is the jar's own bytes (only the directory flattened from `convenience/` to
+   `recipe/blood_infuser/`), so a data pack can override or add them as upstream's `RecipeManager` allows.
+
+### Upstream defects found (and what the port does instead)
+
+1. **`rotten_flesh → leather` can never be made.** `convenience/minecraft_leather.json` (tier 1,
+   375 mB) has the same input and the same cost as `convenience/minecraft_spider_eye.json` (tier 2,
+   375 mB), and upstream's `getRecipe` takes the **highest tier** match
+   (`BlockEntityBloodInfuser.recipeCache`: `max(comparingInt(getInputTier))`). The leather file is dead
+   data upstream. The port does not carry it (`runtime::tests::a_rotten_flesh_makes_eight_spider_eyes`
+   asserts the winner and the absence), and `runtime::infusion_for` documents the rule. Fixing it would
+   mean changing a balance number (its tier or cost), which is not this campaign's call.
+2. **`creeper_head → wither_skeleton_skull` cannot pay.** The file asks for **25,000 mB** of a
+   **10,000 mB** tank (`BlockEntityBloodInfuser.LIQUID_PER_SLOT`), so `canTick` never passes and the
+   recipe is unreachable without a tier upgrade (which multiplies the tank — deviation 3 does not).
+   Not carried; `runtime::tests::every_carried_recipe_fits_its_tank_and_names_a_tier` pins that every
+   carried recipe fits the tank. Worth an upstream report with defect 1.
+3. **Not upstream — this port's own defect, found and fixed here:** both machines are
+   `requires_tool: true` and the jar lists both in `minecraft:mineable/pickaxe`, but slice 1 never
+   carried that tag, so **a survival break dropped nothing** (measured: a diamond pickaxe in hand, the
+   block became air, `drops: []`). The tag now carries both blocks (`data/minecraft/tags/block/mineable/pickaxe.json`,
+   the jar's own list) and phase N proves both drops. The chest's drop was untested before this slice.
+
+### API notes this slice cost (worth an upstream issue/doc fix)
+
+1. **A custom recipe type's serializer name is the recipe file's `type`.** `register_recipe_type("evilcraft:blood_infuser")`
+   plus `register_raw_recipe_serializer(name, "evilcraft:blood_infuser")` with a *bare* `name` registers
+   cleanly and then **crashes the game at data load**: `recipe …/minecraft_blaze_rod.json, unregistered
+   recipe serializer evilcraft:blood_infuser`. Passing the type as the name
+   (`register_raw_recipe_serializer("evilcraft:blood_infuser", "evilcraft:blood_infuser")`) is what works.
+   The doc says "the name" without saying it is the file's `type`; the crash gives no hint.
+2. **`Host::recipes_of_type` hands back each recipe's `json` already parsed** (`Arc<serde_json::Value>`),
+   so a machine reads its own fields without a second parse — worth documenting for porters
+   (`Recipe::json`), and the reason this port needs no JSON dependency of its own.
+3. **`/evilcraft load` needs the `<id:id>` argument kind.** A `word` argument stops at `:`
+   (`argument.entity...` style), and `string` is quoted-only, so an item id in a command needs `id`
+   (delivered as `CommandArgumentValue::String`) — the campaign's `item`-argument trap applies to
+   `fits`, this is the other side of it.
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+### Data-shape gate (`check_261_dialect.py`), and the one offender
+
+```
+$ python3 ports/tools/check_261_dialect.py ports/evilcraft/evilcraft.hmod
+  FAIL evilcraft.hmod:data/evilcraft/loot_table/blocks/blood_chest.json: pools[0] spells "rolls": 1.0; 26.3 writes an integral roll as 1
+data shape: 1 offender(s) in 11 recipe/loot file(s)
+  ok   … the infuser's loot table, and all nine recipe files: bare item/tag strings
+```
+
+The one offender is slice 1's chest table, and `"rolls": 1.0` is one of the three shapes the checker's
+own header calls **unverified** ("26.3 may well accept them"). It does: phase N breaks a fresh chest in
+survival and gets its item (1 dropped). The three *fatal* shapes are clean — no `{"item": …}` ingredient
+anywhere (the infuser's own `input_item` object is this mod's recipe type, which the checker reads as the
+mod's own and accepts), no `"conditions": [ … ]` loot array, and both `requires_tool` blocks are in
+`minecraft:mineable/pickaxe`. The value is left as the jar-verified bytes so the delivered package stays
+byte-identical to the game build that produced the e2e evidence.

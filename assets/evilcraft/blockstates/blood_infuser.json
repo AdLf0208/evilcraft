@@ -1,0 +1,12 @@
+{
+  "variants": {
+    "facing=east,lit=false": { "model": "evilcraft:block/blood_infuser", "y": 90 },
+    "facing=east,lit=true": { "model": "evilcraft:block/blood_infuser", "y": 90 },
+    "facing=north,lit=false": { "model": "evilcraft:block/blood_infuser" },
+    "facing=north,lit=true": { "model": "evilcraft:block/blood_infuser" },
+    "facing=south,lit=false": { "model": "evilcraft:block/blood_infuser", "y": 180 },
+    "facing=south,lit=true": { "model": "evilcraft:block/blood_infuser", "y": 180 },
+    "facing=west,lit=false": { "model": "evilcraft:block/blood_infuser", "y": 270 },
+    "facing=west,lit=true": { "model": "evilcraft:block/blood_infuser", "y": 270 }
+  }
+}

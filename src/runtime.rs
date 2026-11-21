@@ -29,6 +29,105 @@ pub const ANVIL_MULTIPLIER: i32 = 25;
 pub const ANVIL_MB: i32 = MB_PER_DAMAGE * ANVIL_MULTIPLIER;
 /// Upstream `ItemBloodExtractorConfig.containerSize`.
 pub const EXTRACTOR_CAPACITY: i32 = 5_000;
+/// The Blood Infuser, this slice's second machine (upstream `BlockBloodInfuser`).
+pub const INFUSER: &str = "evilcraft:blood_infuser";
+/// The infuser's own recipe type: `data/evilcraft/recipe/blood_infuser/*.json`, read at
+/// run time through `Host::recipes_of_type` (`RecipeBloodInfuser`, `RecipeSerializerBloodInfuser`).
+pub const INFUSION_TYPE: &str = "evilcraft:blood_infuser";
+/// Upstream `BlockEntityBloodInfuser.SLOT_CONTAINER`.
+pub const INFUSER_CONTAINER_SLOT: usize = 0;
+/// Upstream `BlockEntityBloodInfuser.SLOT_INFUSE`.
+pub const INFUSER_INPUT_SLOT: usize = 1;
+/// Upstream `BlockEntityBloodInfuser.SLOT_INFUSE_RESULT`.
+pub const INFUSER_OUTPUT_SLOT: usize = 2;
+/// Upstream `BlockEntityBloodInfuser.LIQUID_PER_SLOT`: ten buckets, as the chest's tank.
+pub const INFUSER_TANK: i32 = 10 * BUCKET;
+/// Upstream `BlockEntityWorking.INVENTORY_SIZE_UPGRADES`.
+pub const UPGRADE_SLOTS: usize = 4;
+/// The infuser's slots: its three machine slots, then the four upgrade slots.
+pub const INFUSER_SLOTS: usize = 3 + UPGRADE_SLOTS;
+/// Upstream `ItemPromise`'s tier upgrades (`Upgrades.UPGRADE_TIER1..3`), the machine's tier.
+pub const TIER_PROMISES: &[(&str, u32)] = &[
+    ("evilcraft:promise_tier_1", 1),
+    ("evilcraft:promise_tier_2", 2),
+    ("evilcraft:promise_tier_3", 3),
+];
+
+/// One `evilcraft:blood_infuser` recipe, as its own file states it
+/// (`RecipeBloodInfuser`): an item, the blood it costs, what it becomes, and how long.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Infusion {
+    /// The recipe's file id, `<namespace>:<path>`, for the readout.
+    pub id: String,
+    /// The item the infusion slot must hold.
+    pub input: String,
+    /// What the output slot receives.
+    pub output: String,
+    /// How many of it (`output_item.count`, one when the file leaves it out).
+    pub output_count: u32,
+    /// `input_fluid.amount`, spent once when the infusion completes.
+    pub blood: i32,
+    /// `duration`, the ticks the infusion takes.
+    pub ticks: u32,
+    /// `tier`, the machine tier the recipe needs (0/absent for none).
+    pub tier: u32,
+}
+
+/// The recipe for `input` on a machine of `tier`, or nothing. Upstream's
+/// `RecipeBloodInfuser.matches` compares the recipe's tier with the machine's, and
+/// the machine's own `Metadata.getTier` reads it from a promise in an upgrade slot.
+///
+/// Two files may infuse the same item (`minecraft:rotten_flesh` makes leather and
+/// spider eyes); the one with the highest tier wins, as upstream's `getRecipe` takes
+/// the highest-tier match.
+#[must_use]
+pub fn infusion_for<'a>(recipes: &'a [Infusion], input: &str, tier: u32) -> Option<&'a Infusion> {
+    recipes
+        .iter()
+        .filter(|recipe| recipe.input == input && recipe.tier <= tier)
+        .max_by_key(|recipe| recipe.tier)
+}
+
+/// One tick of an infusion: `(progress after the tick, whether it completed)`.
+///
+/// Upstream's `TickComponent.tick` adds one to the action's tick, runs it, and resets
+/// the tick to 0 once it reaches the recipe's duration; `InfuseItemTickAction.canTick`
+/// refuses to tick while the tank cannot pay the recipe's blood, which resets the
+/// progress. `None` is that refusal.
+///
+/// `duration` is checked to be at least one: `RecipeSerializerBloodInfuser` refuses a
+/// zero duration, so a file that got here has one.
+#[must_use]
+pub fn infuse_tick(progress: u32, recipe: &Infusion, tank: i32) -> Option<(u32, bool)> {
+    if tank < recipe.blood {
+        return None;
+    }
+    let next = progress.saturating_add(1);
+    if next >= recipe.ticks.max(1) {
+        Some((0, true))
+    } else {
+        Some((next, false))
+    }
+}
+
+/// The machine's tier: the highest promise in its upgrade slots, 0 without one
+/// (upstream `BlockEntityWorking.Metadata.getTier` + `ItemPromise.isTierUpgrade`).
+///
+/// Upstream also gates which upgrade slot a tier fits in; this port carries only the
+/// three tier promises, so the slot index does not change the answer and is not modelled.
+#[must_use]
+pub fn machine_tier<'a>(upgrades: impl IntoIterator<Item = &'a str>) -> u32 {
+    upgrades
+        .into_iter()
+        .filter_map(|item| {
+            TIER_PROMISES
+                .iter()
+                .find(|(id, _)| *id == item)
+                .map(|(_, tier)| *tier)
+        })
+        .max()
+        .unwrap_or(0)
+}
 /// Upstream `ItemBloodExtractorConfig.minimumMobMultiplier`.
 pub const MIN_MOB_MULTIPLIER: f64 = 5.0;
 /// Upstream `ItemBloodExtractorConfig.maximumMobMultiplier`.
@@ -263,5 +362,124 @@ mod tests {
     #[test]
     fn the_slot_layout_matches_upstream() {
         assert_eq!((CHEST_SLOTS, CONTAINER_SLOT, SLOT_COUNT), (10, 10, 11));
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 2: the Blood Infuser
+    // -----------------------------------------------------------------------
+
+    /// The recipes this port carries, decoded from the files it ships.
+    fn carried() -> Vec<Infusion> {
+        crate::infuser::CARRIED
+            .iter()
+            .map(|(name, json)| {
+                crate::infuser::decode_infusion(name, json).expect("a carried recipe decodes")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_bone_becomes_a_blaze_rod_for_two_and_a_half_thousand_mb() {
+        let recipes = carried();
+        let bone = infusion_for(&recipes, "minecraft:bone", 3).expect("a bone is infused");
+        assert_eq!(bone.output, "minecraft:blaze_rod");
+        assert_eq!(bone.output_count, 1);
+        assert_eq!(bone.blood, 2_500);
+        assert_eq!(bone.ticks, 500);
+    }
+
+    #[test]
+    fn a_rotten_flesh_makes_eight_spider_eyes() {
+        let recipes = carried();
+        let eyes = infusion_for(&recipes, "minecraft:rotten_flesh", 3).expect("rotten flesh");
+        // Two jar files infuse rotten flesh at the same 375 mB: this one, tier 2, makes
+        // eight spider eyes, and `minecraft_leather.json`, tier 1, would make leather.
+        // Upstream's `getRecipe` takes the highest tier, so it can never pick the
+        // leather one (an upstream defect, recorded in `notes.md`); the port does not
+        // carry dead data, and this asserts the winner is the eye recipe.
+        assert_eq!(
+            (eyes.output.as_str(), eyes.output_count, eyes.blood),
+            ("minecraft:spider_eye", 8, 375)
+        );
+        assert!(
+            recipes
+                .iter()
+                .all(|recipe| recipe.output != "minecraft:leather"),
+            "the jar's shadowed leather recipe is carried"
+        );
+    }
+
+    #[test]
+    fn an_unknown_item_has_no_infusion() {
+        let recipes = carried();
+        assert!(infusion_for(&recipes, "minecraft:diamond", 3).is_none());
+    }
+
+    #[test]
+    fn a_tier_three_recipe_needs_a_tier_three_machine() {
+        let recipes = carried();
+        // Upstream's convenience recipes declare the tier of the machine they need.
+        assert!(infusion_for(&recipes, "minecraft:bone", 2).is_none());
+        assert!(infusion_for(&recipes, "minecraft:bone", 3).is_some());
+        assert!(infusion_for(&recipes, "minecraft:dirt", 0).is_none());
+        assert!(infusion_for(&recipes, "minecraft:dirt", 1).is_some());
+    }
+
+    #[test]
+    fn the_infusion_completes_on_its_duration_tick() {
+        let bone = infusion_for(&carried(), "minecraft:bone", 3)
+            .cloned()
+            .expect("a bone is infused");
+        assert_eq!(infuse_tick(0, &bone, 10_000), Some((1, false)));
+        assert_eq!(infuse_tick(498, &bone, 10_000), Some((499, false)));
+        assert_eq!(infuse_tick(499, &bone, 10_000), Some((0, true)));
+    }
+
+    #[test]
+    fn a_tank_that_cannot_pay_its_blood_stalls_the_infusion() {
+        let bone = infusion_for(&carried(), "minecraft:bone", 3)
+            .cloned()
+            .expect("a bone is infused");
+        assert_eq!(infuse_tick(10, &bone, 2_499), None);
+        assert_eq!(infuse_tick(10, &bone, 2_500), Some((11, false)));
+    }
+
+    #[test]
+    fn every_carried_recipe_fits_its_tank_and_names_a_tier() {
+        let recipes = carried();
+        assert_eq!(recipes.len(), crate::infuser::CARRIED.len());
+        for recipe in &recipes {
+            assert!(
+                recipe.blood > 0 && recipe.blood <= INFUSER_TANK,
+                "{} costs {} mB of a {INFUSER_TANK} mB tank",
+                recipe.id,
+                recipe.blood
+            );
+            assert!(recipe.ticks > 0, "{} takes no time", recipe.id);
+            assert!(
+                (1..=3).contains(&recipe.tier),
+                "{} names tier {}",
+                recipe.id,
+                recipe.tier
+            );
+            assert_ne!(
+                recipe.input, recipe.output,
+                "{} infuses into itself",
+                recipe.id
+            );
+        }
+    }
+
+    #[test]
+    fn a_tier_promise_is_the_machines_tier() {
+        assert_eq!(machine_tier([]), 0);
+        assert_eq!(machine_tier(["minecraft:stone"]), 0);
+        assert_eq!(machine_tier(["evilcraft:promise_tier_1"]), 1);
+        assert_eq!(machine_tier(["evilcraft:promise_tier_3"]), 3);
+        assert_eq!(
+            machine_tier(["evilcraft:promise_tier_2", "evilcraft:promise_tier_3"]),
+            3
+        );
+        assert_eq!((INFUSER_SLOTS, UPGRADE_SLOTS), (7, 4));
     }
 }

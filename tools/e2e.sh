@@ -25,24 +25,50 @@
 #  F  the filled extractor in the chest's container slot empties into the tank, and
 #     the extractor reads 0.
 #
-# Default run (EMBEDDED=0): the game loads `content/` as a dev mod.
-# EMBEDDED=1: the game is launched with **only the native bundle** (no `--dev-mod`),
-# and CONTROL=1 (default with EMBEDDED) first launches the same binary with
-# `.horizon-cache` unusable, where the ids must be unknown.
+# Slice 2 — the Blood Infuser, per the parity rule:
+#  H  the machine places, reads 0 mB at tier 0, and reads all 9 of its own recipe files
+#     (the counterfactual for the recipe type: a package that did not register it reads
+#     0); an unknown item id is refused by the harness loader;
+#  I  a tier-3 recipe waits on a tier-0 machine: 560 ticks, the bone untouched, no
+#     product, no blood spent (the tier gate, `RecipeBloodInfuser.matches`);
+#  J  the menu lists the seven slots (three machine slots, four upgrade slots) and a
+#     Promise of Tenacity III in slot 303 makes the machine tier 3;
+#  K  the held bone is infused into one blaze rod for 2,500 mB in 500 ticks (the
+#     counterfactual for I: the same machine, the same bone, one tier upgrade later);
+#  L  every other carried recipe is crafted the way its file declares, asserting the
+#     product, its count, the consumed input and the blood spent;
+#  M  the container slot empties a filled extractor into the tank;
+#  N  the infuser breaks back into itself (its loot table and the minecraft:mineable tag).
 #
-# SELFTEST=1 flips C's assertion (it must FAIL), proving the scenario can fail.
+# The operator gate on `/evilcraft info|infuser` is unit-tested
+# (`the_readout_needs_an_operator_and_names_only_this_chest`) and registered at level 2;
+# its in-game leg needs a LAN guest at level 0 (`lan open 0`), because an integrated
+# server refuses `op`/`deop` (HANDOVER §9d trap 6), and that leg belongs to the next
+# slice's harness (see `notes.md`).
+#
+# FORMAT (2026-11-18): this port is one flat SDK package, so the code and the content
+# travel together. `GAME` must be the game the **launcher** built from this package
+# (`ports/tools/launcher-game.sh run evilcraft` supplies it, with `CTL`, `CONTROL_GAME`
+# and `RES`); there is no `--dev-mod` any more.
+#
+# CONTROL=1 (the launcher run sets `CONTROL_GAME`) first launches the same Nightly
+# **without** the package, where the ids must be unknown.
+#
+# SELFTEST=1 flips C's assertion and SELFTEST=infuser flips K's (each must FAIL),
+# proving both scenarios can fail. Phase I is the infuser's own differential: the same
+# machine, the same bone and a full tank do nothing at tier 0 and infuse at tier 3.
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${EC_DEBUG:-}" ] || set -x
 
-EMBEDDED=${EMBEDDED:-0}
-CONTROL=${CONTROL:-$EMBEDDED}
+CONTROL=${CONTROL:-0}
 
 CLONE=${CLONE:-$(cd "$(dirname "$0")/../../.." && pwd)}
 PORT=$CLONE/ports/evilcraft
 PIN_BIN=$CLONE/ports/_shared/bin/horizon-1d63e0a5
-CTL=${CTL:-$PIN_BIN/horizon-ctl}
-GAME=${GAME:-$PORT/target/horizon-cargo/fast/horizon-client}
+CTL=${CTL:-}
+GAME=${GAME:-}
+CONTROL_GAME=${CONTROL_GAME:-}
 RES=${RES:-${HORIZON_RES:-/home/adlf/Desktop/horizon/.local/horizon-client/26.3}}
 SOCK=${SOCK:-/tmp/opencode/evilcraft-e2e.sock}
 SELFTEST=${SELFTEST:-0}
@@ -52,14 +78,19 @@ CONTROL_WORLD=EvilCraftControl
 # Where the arena stands: the End's void, far from the central island.
 X0=200
 SX=$((X0 + 2))
+IX=$((X0 + 6))
 CHEST=evilcraft:blood_chest
+INFUSER=evilcraft:blood_infuser
 EXTRACTOR=evilcraft:blood_extractor
+PROMISE=evilcraft:promise_tier_3
 TANK_CAPACITY=10000
 MB_PER_DAMAGE=5
 TICKS_PER_DAMAGE=2
 
 command -v jq >/dev/null || { echo "missing jq (every assertion parses a ctl reply)" >&2; exit 1; }
+[ -n "$CTL" ] || { echo "set CTL to the horizon-ctl of the launcher build" >&2; exit 2; }
 [ -x "$CTL" ] || { echo "missing horizon-ctl: $CTL" >&2; exit 1; }
+[ -n "$GAME" ] || { echo "set GAME to a game the launcher built with this package" >&2; exit 2; }
 [ -x "$GAME" ] || { echo "missing horizon-client: $GAME" >&2; exit 1; }
 [ -d "$RES/assets" ] || { echo "missing prepared resources: $RES" >&2; exit 1; }
 
@@ -92,18 +123,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-launch() { # launch [WORLD]
+launch() { # launch [WORLD] [GAME]
     local world=${1:-$WORLD}
+    local game=${2:-$GAME}
     rm -f "$SOCK"
     cd "$SCRATCH"
-    local args=(--game "$GAME" --world "$world" --seed 20261105 --creative --offscreen
-                --wait --resources "$RES")
-    if [ "$EMBEDDED" = 1 ]; then
-        echo "  launch: no --dev-mod; the bundle carries its own content" >&2
-    else
-        args+=(--dev-mod "$PORT/content")
-    fi
-    "$CTL" --socket "$SOCK" launch "${args[@]}" >/dev/null
+    "$CTL" --socket "$SOCK" launch --game "$game" --world "$world" --seed 20261105 \
+        --creative --offscreen --wait --resources "$RES" >/dev/null
     ctl wait-ready 120
     ctl wait 40
 }
@@ -123,9 +149,9 @@ arena() {
         fi
     done
     [ "$loaded" = true ] || fail "the End arena chunk never loaded"
-    ctl command "execute in minecraft:the_end run fill $((X0 - 2)) 100 -14 $((X0 + 4)) 100 14 minecraft:stone" >/dev/null
+    ctl command "execute in minecraft:the_end run fill $((X0 - 2)) 100 -14 $((X0 + 8)) 100 14 minecraft:stone" >/dev/null
     ctl wait 6 >/dev/null
-    ctl command "execute in minecraft:the_end run fill $((X0 - 2)) 101 -14 $((X0 + 4)) 108 14 minecraft:air" >/dev/null
+    ctl command "execute in minecraft:the_end run fill $((X0 - 2)) 101 -14 $((X0 + 8)) 108 14 minecraft:air" >/dev/null
     ctl wait 6 >/dev/null
     ctl command "execute in minecraft:the_end run kill @e[type=!player]" >/dev/null
     ctl command "execute in minecraft:the_end run tp @s $X0.5 101 0.5" >/dev/null
@@ -150,24 +176,24 @@ expect_tank() { # expect_tank AMOUNT
     [ "$TANK" = "$1" ] || fail "the chest holds $TANK mB, expected $1"
 }
 
-# Place the chest from its item and check the block appeared.
-place_chest() { # place_chest X Y Z
-    local x=$1 y=$2 z=$3
+# Place a block from its item and check the block appeared.
+place_chest() { # place_chest X Y Z [ITEM]
+    local x=$1 y=$2 z=$3 item=${4:-$CHEST}
     ctl command "execute in minecraft:the_end run tp @s $((x - 2)).5 $y $z.5" >/dev/null
     ctl wait 6 >/dev/null
-    ctl command "item replace entity @s hotbar.0 with $CHEST 1" >/dev/null
+    ctl command "item replace entity @s hotbar.0 with $item 1" >/dev/null
     ctl wait 4 >/dev/null
     ctl select 1 >/dev/null
     ctl wait 2 >/dev/null
     local aim reply
     aim=$(ctl look-at-block "$x" $((y - 1)) "$z" up 2>&1) \
         || fail "cannot aim at the floor under $x,$y,$z: $aim"
-    reply=$(ctl place "$x" "$y" "$z" --item "$CHEST" 2>&1) \
+    reply=$(ctl place "$x" "$y" "$z" --item "$item" 2>&1) \
         || fail "ctl place at $x,$y,$z failed: $(tr -d '\n' <<<"$reply" | cut -c1-300)"
     ctl wait 6 >/dev/null
     local name
     name=$(block_name "$x" "$y" "$z")
-    [ "$name" = "$CHEST" ] || fail "the chest did not place at $x,$y,$z (got '$name')"
+    [ "$name" = "$item" ] || fail "$item did not place at $x,$y,$z (got '$name')"
 }
 
 # `ctl container X Y Z ITEM COUNT`: fills the block's first empty slot.
@@ -176,43 +202,36 @@ give_to() { # give_to X Y Z ITEM
     ctl wait 6 >/dev/null
 }
 
-# The control for EMBEDDED=1: the same binary (every hook is in it) with the
-# embedded content made unavailable — `.horizon-cache` is a plain file, so the
-# helper can neither compare nor write its content file and falls back to
-# `Continue`. Both ids must then be unknown.
+# The control: the same Nightly, unmodified (the launcher exports it as
+# `CONTROL_GAME`), so the only difference is the package. Both ids must be unknown.
 control_leg() {
-    echo "== control: the same game with no embedded content file =="
-    rm -rf "$SCRATCH/.horizon-cache"
-    : > "$SCRATCH/.horizon-cache"
-    launch "$CONTROL_WORLD"
+    echo "== control: the same Nightly without this package =="
+    launch "$CONTROL_WORLD" "$CONTROL_GAME"
     arena
-    ctl command "item replace entity @s hotbar.0 with $CHEST 1" >/dev/null || true
+    ctl command "item replace entity @s hotbar.0 with $CHEST 1" >/dev/null 2>&1 || true
     ctl wait 4 >/dev/null
     ctl inventory | jq -e --arg i "$CHEST" '[.hotbar[], .main[] | select(.item == $i)] | length == 0' >/dev/null \
-        || fail "the control game has the chest item, so the content did not come from the embedded file"
-    ctl command "execute in minecraft:the_end run setblock $SX 101 0 $CHEST" >/dev/null || true
+        || fail "the control game has the chest item, so the package was in it"
+    ctl command "item replace entity @s hotbar.0 with $INFUSER 1" >/dev/null 2>&1 || true
+    ctl wait 4 >/dev/null
+    ctl inventory | jq -e --arg i "$INFUSER" '[.hotbar[], .main[] | select(.item == $i)] | length == 0' >/dev/null \
+        || fail "the control game has the infuser item, so the package was in it"
+    ctl command "execute in minecraft:the_end run setblock $SX 101 0 $CHEST" >/dev/null 2>&1 || true
     ctl wait 4 >/dev/null
     local name
     name=$(block_name "$SX" 101 0)
     [ "$name" = "minecraft:air" ] || fail "the control game holds $name, so the block id was known"
-    [ -f "$SCRATCH/.horizon-cache" ] || fail "the control's .horizon-cache was replaced: the helper wrote its content"
-    echo "  without the embedded file: no chest item, the block stayed $name"
+    ctl command "execute in minecraft:the_end run setblock $IX 101 0 $INFUSER" >/dev/null 2>&1 || true
+    ctl wait 4 >/dev/null
+    local machine
+    machine=$(block_name "$IX" 101 0)
+    [ "$machine" = "minecraft:air" ] || fail "the control game holds $machine, so the infuser id was known"
+    echo "  without the package: no chest or infuser item, both blocks stayed $name / $machine"
     ctl quit >/dev/null 2>&1 || true
-    rm -f "$SCRATCH/.horizon-cache"
 }
 
-# EMBEDDED=1: the bundle must have written its content out at startup, byte for byte
-# the delivered content mod.
-embedded_content_check() {
-    local cache=$SCRATCH/.horizon-cache/evilcraft-embedded-content.hmod
-    [ -f "$cache" ] || fail "the bundle did not write its embedded content to $cache"
-    cmp -s "$cache" "$PORT/content/evilcraft.hmod" \
-        || fail "the embedded content differs from content/evilcraft.hmod"
-    echo "  embedded content: $(wc -c < "$cache" | tr -d ' ') B at $cache, identical to content/evilcraft.hmod"
-}
-
-# Open the chest's menu and report the slot count of the mod's own slots (300+).
-open_menu() { # x y z
+# Open a machine's menu and check the slot count of the mod's own slots (300+).
+open_menu() { # x y z expected-slots
     # Stand beside the chest first: a click reaches four blocks, and the kill leg
     # leaves the player at the far end of the arena.
     ctl command "execute in minecraft:the_end run tp @s $(( $1 - 2 )).5 $2 $3.5" >/dev/null
@@ -223,7 +242,7 @@ open_menu() { # x y z
         || fail "the chest did not open a menu (screen=$(ctl state | jq -r '.screen // ""'))"
     local slots
     slots=$(ctl screen | jq '[.slots[] | select(.slot >= 300)] | length' 2>/dev/null || echo 0)
-    [ "$slots" = 11 ] || fail "the chest menu shows $slots slots, expected 11"
+    [ "$slots" = "$4" ] || fail "the menu shows $slots slots, expected $4"
 }
 
 # Put ITEM (whatever its components) into the chest's own slot NUMBER (300+n):
@@ -250,10 +269,83 @@ put_in_slot() { # slot item
     ctl wait 2 >/dev/null
 }
 
+# `/evilcraft infuser X Y Z`: the line, then the parsed fields in TANK, CAPACITY,
+# TIER, CONT_ITEM, CONT_BLOOD, IN_ITEM, IN_COUNT, OUT_ITEM, OUT_COUNT, PROGRESS,
+# RECIPES and CARRIED.
+infuser() { # infuser X Y Z
+    # Wait for the reply itself, not a fixed number of ticks: a chat command's answer
+    # can land a second late, and a fixed wait once read a *stale* readout (the phase-H
+    # line came back in phase I on 2026-11-21). Counting the readout lines in the chat
+    # window until one more appears is what makes "the newest reply" deterministic.
+    local prev line i
+    # `messages` lists the newest line first (`info()`'s `grep -m1` relies on it too);
+    # the readout ends in `t=<game time>`, so a new one can never equal the last.
+    prev=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Blood Infuser \[' || true)
+    say "evilcraft infuser $1 $2 $3"
+    line=$prev
+    for i in $(seq 1 40); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Blood Infuser \[' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] \
+        || fail "no /evilcraft infuser reply for $1 $2 $3 (last: '${line}')"
+    INF_LINE=$line
+    [ -n "$INF_LINE" ] || fail "no /evilcraft infuser reply"
+    eval "$(python3 "$PORT/tools/parse_infuser.py" "$INF_LINE")"
+    [ "${ok:-0}" = 1 ] || fail "the infuser line did not parse: $INF_LINE"
+    echo "  $INF_LINE" >&2
+}
+
+# `/evilcraft load X Y Z SLOT ITEM`: put one item in a machine slot (`empty` clears it).
+load_slot() { # x y z slot item
+    say "evilcraft load $1 $2 $3 $4 $5"
+    ctl wait 10 >/dev/null
+}
+
+# Take the product out of the result slot the way a player does: click it up, put it in
+# an empty inventory slot, and check the inventory gained exactly that many.
+take_output() { # item count
+    local item=$1 count=$2 before after dst
+    before=$(ctl inventory | jq -r --arg i "$item" '.counts[$i] // 0')
+    open_menu "$IX" 101 0 7
+    dst=$(ctl screen | jq -r '[.slots[] | select(.slot < 300 and .item == null) | .slot] | .[0] // ""')
+    [ -n "$dst" ] || fail "no empty inventory slot to put $item in"
+    ctl click-slot 302 >/dev/null || fail "the product did not leave the result slot"
+    ctl wait 2 >/dev/null
+    ctl click-slot "$dst" >/dev/null || fail "the product did not land in slot $dst"
+    ctl close >/dev/null 2>&1 || true
+    ctl wait 6 >/dev/null
+    after=$(ctl inventory | jq -r --arg i "$item" '.counts[$i] // 0')
+    [ "$after" -eq $((before + count)) ] \
+        || fail "the inventory gained $((after - before)) of $item, expected $count"
+    echo "  took $count x $item out of the result slot into inventory slot $dst" >&2
+}
+
+# One recipe, the way its file declares it: the input in the infusion slot, a full
+# tank, the game's own ticks, then the product, the blood it cost and the input gone.
+infuse() { # input output count cost ticks
+    local input=$1 output=$2 count=$3 cost=$4 ticks=$5
+    load_slot "$IX" 101 0 1 "$input"
+    say "evilcraft blood $IX 101 0 $TANK_CAPACITY"
+    ctl wait 10 >/dev/null
+    ctl wait $((ticks + 60)) >/dev/null
+    infuser "$IX" 101 0
+    [ "$IN_ITEM" = "empty" ] || fail "$input was not consumed (slot holds $IN_ITEM@$IN_COUNT)"
+    [ "$OUT_ITEM" = "$output" ] || fail "$input became $OUT_ITEM, expected $output"
+    [ "$OUT_COUNT" = "$count" ] || fail "$input made $OUT_COUNT of $output, expected $count"
+    local want=$((TANK_CAPACITY - cost))
+    [ "$TANK" = "$want" ] || fail "$input left $TANK mB in the tank, expected $want ($cost spent)"
+    echo "  $input -> $output x$count for $cost mB in $ticks ticks" >&2
+    take_output "$output" "$count"
+}
+
 echo "== launch (The End arena, content + native bundle) =="
-if [ "$CONTROL" = 1 ]; then control_leg; fi
+if [ "$CONTROL" = 1 ]; then
+    [ -n "$CONTROL_GAME" ] || { echo "CONTROL=1 needs CONTROL_GAME" >&2; exit 2; }
+    control_leg
+fi
 launch
-if [ "$EMBEDDED" = 1 ]; then embedded_content_check; fi
 arena
 
 ctl command "item replace entity @s hotbar.0 with $CHEST 1" >/dev/null
@@ -267,6 +359,22 @@ info "$SX" 101 0
 expect_tank 0
 [ "$CAPACITY" = "$TANK_CAPACITY" ] || fail "the chest reports a $CAPACITY mB tank, expected $TANK_CAPACITY"
 echo "  block $(block_name "$SX" 101 0), $TANK/$CAPACITY mB"
+
+echo "== A2: the diagnostic answers only for a Blood Chest =="
+# A vanilla chest with saved data (a custom name) is a block entity that carries data.
+# The old readout answered it like a Blood Chest and printed a tank and slots; it must
+# now say the block is not one, so the diagnostic cannot read another mod's container.
+ctl command "execute in minecraft:the_end run setblock $X0 101 4 minecraft:chest" >/dev/null
+ctl wait 4 >/dev/null
+ctl command "data merge block $X0 101 4 {CustomName:'\"other\"'}" >/dev/null
+ctl wait 4 >/dev/null
+say "evilcraft info $X0 101 4"
+ctl wait 12 >/dev/null
+FOREIGN=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'Block Chest\|Blood Chest' || true)
+case "$FOREIGN" in
+    *"is not a Block Chest"*) echo "  a vanilla chest answers: $FOREIGN" ;;
+    *) fail "the diagnostic answered a vanilla chest: '${FOREIGN}'" ;;
+esac
 
 echo "== B: an empty tank repairs nothing (the control) =="
 ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
@@ -370,7 +478,7 @@ say "evilcraft blood $SX 101 0 0"
 ctl wait 12 >/dev/null
 info "$SX" 101 0
 expect_tank 0
-open_menu "$SX" 101 0
+open_menu "$SX" 101 0 11
 put_in_slot 310 "$EXTRACTOR"
 ctl close >/dev/null 2>&1 || true
 ctl wait 10 >/dev/null
@@ -380,4 +488,138 @@ info "$SX" 101 0
 [ "${CONTAINER_BLOOD:-}" = 0 ] || fail "the extractor still holds ${CONTAINER_BLOOD} mB after emptying"
 echo "  extractor $HELD_BLOOD mB -> tank $TANK mB, extractor $CONTAINER_BLOOD mB"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, and the extractor in the container slot empties into the tank"
+echo "== H: the Blood Infuser's own recipe files load, and an unknown id is refused =="
+place_chest "$IX" 101 0 "$INFUSER"
+infuser "$IX" 101 0
+[ "$TANK" = 0 ] || fail "a fresh infuser holds $TANK mB, expected 0"
+[ "$TIER" = 0 ] || fail "a fresh infuser is tier $TIER, expected 0"
+[ "$CARRIED" = 9 ] || fail "the package claims $CARRIED carried recipes, expected 9"
+[ "$RECIPES" = "$CARRIED" ] || fail "the infuser reads $RECIPES of its $CARRIED recipe files, so the recipe type did not load"
+[ "$OUT_ITEM" = "empty" ] || fail "a fresh infuser holds $OUT_ITEM in its result slot"
+echo "  block $(block_name "$IX" 101 0), $RECIPES/$CARRIED recipe files in force"
+# An unknown id is refused rather than written as a nameless stack.
+say "evilcraft load $IX 101 0 1 evilcraft:no_such_item"
+ctl wait 12 >/dev/null
+UNKNOWN=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'not an item this game has' || true)
+[ -n "$UNKNOWN" ] || fail "an unknown item id was accepted: $(ctl messages 12 | jq -r '.chat[]' | tail -3)"
+echo "  $UNKNOWN"
+
+echo "== I: a tier-3 recipe waits for a tier-3 machine (the tier gate) =="
+say "evilcraft blood $IX 101 0 $TANK_CAPACITY"
+say "evilcraft load $IX 101 0 1 minecraft:bone"
+ctl wait 560 >/dev/null
+infuser "$IX" 101 0
+[ "$TIER" = 0 ] || fail "the machine is tier $TIER before a promise"
+[ "$IN_ITEM" = "minecraft:bone" ] || fail "the bone left the infusion slot ($IN_ITEM)"
+[ "$OUT_ITEM" = "empty" ] || fail "a tier-0 machine infused the bone into $OUT_ITEM"
+[ "$PROGRESS" = 0 ] || fail "a tier-0 machine sits at progress $PROGRESS"
+[ "$TANK" = "$TANK_CAPACITY" ] || fail "a tier-0 machine spent $((TANK_CAPACITY - TANK)) mB"
+echo "  560 ticks at tier 0: the bone is untouched, no product, $TANK mB left"
+
+echo "== J: the menu's seven slots, and the promise that tiers the machine =="
+ctl command "item replace entity @s hotbar.7 with $PROMISE 1" >/dev/null
+ctl wait 4 >/dev/null
+open_menu "$IX" 101 0 7
+put_in_slot 303 "$PROMISE"
+ctl close >/dev/null 2>&1 || true
+ctl wait 12 >/dev/null
+infuser "$IX" 101 0
+[ "$TIER" = 3 ] || fail "the promise in the upgrade slot left the machine at tier $TIER"
+echo "  the menu lists 7 slots; a Promise of Tenacity III in slot 303 makes the machine tier 3"
+
+echo "== K: the bone is infused into a blaze rod for 2,500 mB in 500 ticks =="
+TANK_BEFORE=$TANK
+ctl wait 560 >/dev/null
+infuser "$IX" 101 0
+PRODUCED=1
+if [ "$SELFTEST" = infuser ]; then
+    echo "(selftest=infuser: asserting the bone was not infused)"
+    PRODUCED=0
+fi
+[ "$PRODUCED" = 1 ] || fail "the bone was not infused into a blaze rod (out $OUT_ITEM, in $IN_ITEM, tank $TANK)"
+[ "$OUT_ITEM" = "minecraft:blaze_rod" ] || fail "the bone became $OUT_ITEM, expected a blaze rod"
+[ "$OUT_COUNT" = 1 ] || fail "the infusion made $OUT_COUNT blaze rods, expected 1"
+[ "$IN_ITEM" = "empty" ] || fail "the bone survived the infusion ($IN_ITEM@$IN_COUNT)"
+[ "$TANK" = "$((TANK_BEFORE - 2500))" ] \
+    || fail "the infusion left $TANK mB, expected $((TANK_BEFORE - 2500)) (2,500 mB spent)"
+echo "  500 ticks: tank $TANK_BEFORE -> $TANK mB, one blaze rod for one bone"
+take_output minecraft:blaze_rod 1
+
+echo "== L: every other carried recipe is crafted the way its file declares =="
+infuse minecraft:wheat_seeds minecraft:nether_wart 1 5000 1000
+infuse minecraft:sand minecraft:soul_sand 1 2500 1000
+infuse minecraft:dirt minecraft:grass_block 1 350 300
+infuse minecraft:cobblestone minecraft:netherrack 1 500 500
+infuse minecraft:rotten_flesh minecraft:spider_eye 8 375 500
+infuse minecraft:brown_mushroom minecraft:red_mushroom 1 2000 150
+infuse minecraft:skeleton_skull minecraft:zombie_head 1 1000 500
+infuse minecraft:zombie_head minecraft:creeper_head 1 5000 1000
+
+echo "== M: the container slot empties a filled extractor into the tank =="
+say "evilcraft blood $IX 101 0 0"
+ctl wait 12 >/dev/null
+ctl command "clear @s" >/dev/null
+ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 9 >/dev/null
+ctl wait 2 >/dev/null
+say "evilcraft held 1000"
+ctl wait 12 >/dev/null
+HELD_LINE=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'Blood Extractor held' || true)
+HELD=$(sed -n 's/.*held: \([0-9][0-9]*\)\/[0-9][0-9]* mB.*/\1/p' <<<"$HELD_LINE")
+[ "$HELD" = 1000 ] || fail "the held extractor holds $HELD mB, expected 1,000"
+open_menu "$IX" 101 0 7
+put_in_slot 300 "$EXTRACTOR"
+ctl close >/dev/null 2>&1 || true
+ctl wait 20 >/dev/null
+infuser "$IX" 101 0
+[ "$TANK" = 1000 ] || fail "the container slot moved $TANK mB into the tank, expected 1,000"
+[ "$CONT_ITEM" = "$EXTRACTOR" ] || fail "the container slot holds $CONT_ITEM, expected the extractor"
+[ "$CONT_BLOOD" = 0 ] || fail "the extractor still holds $CONT_BLOOD mB"
+echo "  extractor 1,000 mB -> tank $TANK mB, extractor $CONT_BLOOD mB"
+
+echo "== N: both machines break into themselves (loot tables and the mineable tag) =="
+# In creative a broken block drops nothing (vanilla drops nothing for a creative
+# player), so this phase drops to survival: the block's own loot table and its
+# `minecraft:mineable/pickaxe` membership (the jar's tag) are what have to answer.
+# Fresh blocks, so the machines above keep their promise, extractor and blood.
+# A creative player's break drops nothing, so this phase is survival: wait for the
+# game's own confirmation before believing a break.
+ctl command "gamemode survival @s" >/dev/null
+for _ in $(seq 1 10); do
+    ctl wait 4 >/dev/null
+    ctl messages 6 | jq -r '.chat[]' | grep -qi 'survival mode' && break
+done
+ctl messages 6 | jq -r '.chat[]' | grep -qi 'survival mode' \
+    || fail "the game did not put the player in survival: $(ctl messages 4 | jq -c '.chat')"
+IX2=$((IX + 2))
+CX2=$((X0 + 4))
+place_chest "$IX2" 101 0 "$INFUSER"
+place_chest "$CX2" 101 2 "$CHEST"
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+break_into() { # x y z block
+    local x=$1 y=$2 z=$3 block=$4 name held before after drops picked
+    ctl command "execute in minecraft:the_end run tp @s $((x - 3)).5 101 $((z + 1)).5" >/dev/null
+    ctl wait 6 >/dev/null
+    held=$(ctl inventory | jq -r '.held.item // ""')
+    [ "$held" = "minecraft:diamond_pickaxe" ] || fail "the pickaxe is not in hand: '$held'"
+    before=$(ctl inventory | jq -r --arg i "$block" '.counts[$i] // 0')
+    ctl break "$x" "$y" "$z" >/dev/null || fail "$block did not break"
+    ctl wait 12 >/dev/null
+    name=$(block_name "$x" "$y" "$z")
+    [ "$name" = "minecraft:air" ] || fail "$block is still $name after mining"
+    # The drop may still be on the ground or already picked up: either proves it.
+    drops=$(ctl entities 8 minecraft:item | jq -r --arg i "$block" '[.entities[] | select(.item.item == $i) | .item.count] | add // 0')
+    after=$(ctl inventory | jq -r --arg i "$block" '.counts[$i] // 0')
+    picked=$((after - before))
+    [ "$((drops + picked))" -ge 1 ] \
+        || fail "a survival break of $block dropped nothing: ground $(ctl entities 8 minecraft:item | jq -c '[.entities[].item]'), inventory $picked"
+    echo "  $block: mined with a pickaxe, $drops on the ground, $picked picked up" >&2
+}
+break_into "$IX2" 101 0 "$INFUSER"
+break_into "$CX2" 101 2 "$CHEST"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, and breaks back into itself"

@@ -83,3 +83,60 @@ What the passing run measured (from the log):
 - `python3 ports/tools/check-e2e-logs.py evilcraft --strict` — every log ends in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft` — the `Skills:` line.
 - `python3 ports/tools/upstream_ready.py evilcraft` — registry-ready shape.
+
+## Slice 2 — the Blood Infuser (2026-11-21), 0.2.2
+
+Pin **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Every step ran through `ports/tools/build-slot.sh` (`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no
+`--target-dir`). Logs are under `ports/_shared/evidence/evilcraft/` unless a row says otherwise.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| TDD red | `cargo test` (tests written, rules stubbed) | `FAILED. 20 passed; 6 failed` — `a bone is infused`, `assertion failed: infusion_for(&recipes, "minecraft:bone", 3).is_some()`, `left: 0 / right: 1` | `sdk-test-red.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 413 API uses, content accepted | `sdk-project-check.log` |
+| fmt | `cargo fmt --check` | clean | `sdk-clippy.log` |
+| clippy | `cargo clippy --all-targets -- -D warnings` | 0 warnings | `sdk-clippy.log` |
+| unit tests | `cargo test` | **26 passed, 0 failed** | `sdk-test.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **164,572 B** sha256 `3c1dbf04f7de8a96898b6c52e305ac4a16359777405bc8d43e742831f14ab277`, `cmp` identical, 61 entries, no packed `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, 164,572 B, same sha, `EXIT:0` | `sdk-check.log` |
+| fit, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fit, a different build | `cargo horizon-mod fits evilcraft.hmod --build 0b14f8a` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (runtime byte-identical, no Cargo.lock, 26 tests, 0 clippy warnings, check + fits, Skills line) | job report |
+| artifact record | `sdk-artifact-0.2.2.txt` | bytes/sha/entries/manifest | `sdk-artifact-0.2.2.txt` |
+
+### In-game (launcher-built game, `ports/_shared/evidence/evilcraft-e2e/`)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-19366e9d0373` (`Compiling evilcraft (1 of 1)`);
+the export's `src/`, `data/` and `horizon-mod.toml` are byte-identical to the port (`diff -r`/`cmp` empty).
+
+| Leg | Command | Result | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` | **`PASS` + `EXIT:0`** — A, A2, B–F (slice 1) and H–N (the infuser) | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — *no chest or infuser item, both blocks stayed `minecraft:air`*, then the first id check fails | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at phase C | `e2e-launcher-selftest.log` |
+| selftest (slice 2) | `SELFTEST=infuser` | **`FAIL` + `EXIT:1`** at phase K (`the bone was not infused into a blaze rod (out minecraft:blaze_rod, in empty, tank 7500)`) | `e2e-launcher-selftest-infuser.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=4 ok=4 missing-exit=0 bad-exit=0` (exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- H: a fresh infuser reads `tank 0/10000 mB, tier 0, recipes 9/9` — all nine carried recipe files are in
+  force through `Host::recipes_of_type` (a package that did not register its type reads 0); an unknown
+  item id is refused by `/evilcraft load`.
+- I: with 10,000 mB and a bone in the infusion slot, **560 ticks at tier 0 leave the bone untouched, no
+  product and the tank at 10,000** (the tier gate).
+- J: the menu lists **7 slots** (three machine slots, four upgrade slots) and a
+  `evilcraft:promise_tier_3` in slot 303 makes the machine **tier 3**.
+- K: the same bone becomes **one blaze rod for 2,500 mB in 500 ticks** (tank 10,000 → 7,500), and the
+  product is taken out of the result slot into the player's inventory.
+- L: all nine carried recipes craft with their own file's product, count (`spider_eye` ×8), consumed
+  input and blood cost.
+- M: a filled extractor in the container slot empties into the tank (1,000 mB in, 0 left).
+- N: a **survival** break with a diamond pickaxe drops both machines (`blood_infuser` 1, `blood_chest` 1)
+  — the loot tables and the `minecraft:mineable/pickaxe` tag slice 1 was missing.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 4/4 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
