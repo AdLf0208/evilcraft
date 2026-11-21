@@ -228,6 +228,25 @@ pub fn anvil_step(item: &str, tank: i32) -> Option<(&'static str, i32)> {
     anvil_target(item).map(|next| (next, tank - ANVIL_MB))
 }
 
+/// What a broken machine's own item carries (`LootFunctionCopyTankData`): the tank's
+/// amount, or nothing when the tank is empty.
+///
+/// Upstream inserts the fluid into the item only when it is not empty
+/// (`if (!resource.isEmpty())`), so a broken empty machine drops a plain item that needs
+/// no restoring on placement. A negative amount is not a tank either.
+#[must_use]
+pub fn carried_tank(tank: i32) -> Option<i32> {
+    (tank > 0).then(|| tank.min(TANK_CAPACITY))
+}
+
+/// The tank a placed item's payload restores, clamped to the machine's capacity
+/// (upstream sets the item's tank capacity first, so the insert cannot pass it; a
+/// `/give`d item naming 20,000 mB places a full 10,000 mB machine).
+#[must_use]
+pub fn restored_tank(carried: i32) -> i32 {
+    carried.clamp(0, TANK_CAPACITY)
+}
+
 /// Empty a blood container into the chest's tank, never past its capacity.
 /// Returns `(tank, what the container keeps)`.
 #[must_use]
@@ -362,6 +381,39 @@ mod tests {
     #[test]
     fn the_slot_layout_matches_upstream() {
         assert_eq!((CHEST_SLOTS, CONTAINER_SLOT, SLOT_COUNT), (10, 10, 11));
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 3: the tank on the broken machine's own item
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_broken_machine_carries_its_tank_and_an_empty_one_carries_nothing() {
+        assert_eq!(carried_tank(6_500), Some(6_500));
+        assert_eq!(carried_tank(TANK_CAPACITY), Some(TANK_CAPACITY));
+        assert_eq!(carried_tank(0), None, "an empty tank travels on no item");
+        assert_eq!(carried_tank(-40), None, "a negative amount is not a tank");
+    }
+
+    #[test]
+    fn a_carried_tank_comes_back_whole() {
+        for amount in [1, 3_500, TANK_CAPACITY] {
+            let carried = carried_tank(amount).expect("a filled tank travels");
+            assert_eq!(
+                restored_tank(carried),
+                amount,
+                "{amount} mB did not survive"
+            );
+        }
+    }
+
+    #[test]
+    fn a_doctored_tank_is_clamped_to_the_capacity_when_it_is_placed() {
+        assert_eq!(restored_tank(20_000), TANK_CAPACITY);
+        assert_eq!(restored_tank(TANK_CAPACITY + 1), TANK_CAPACITY);
+        assert_eq!(restored_tank(-1), 0);
+        assert_eq!(restored_tank(0), 0);
+        assert_eq!(restored_tank(6_500), 6_500);
     }
 
     // -----------------------------------------------------------------------

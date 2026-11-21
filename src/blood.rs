@@ -722,26 +722,33 @@ pub(crate) fn write_int(nbt: &mut Compound, name: &str, value: i32) {
     nbt.insert(name.into(), Tag::Int(value));
 }
 
-/// The blood in the entity's first tank, in the pin's saved `fluids` shape. A tank
-/// holding another fluid, or nothing, reads as empty.
-pub(crate) fn read_tank(nbt: &Compound) -> i32 {
+/// The blood in the entity's first tank, in the pin's saved `fluids` shape, exactly as the
+/// compound states it: the amount is **not** clamped, so a payload an item was given
+/// (`/give … Amount:20000`) can be told apart from a tank the machine filled itself.
+/// A tank holding another fluid, or nothing, reads as empty.
+pub(crate) fn read_tank_raw(nbt: &Compound) -> Option<i32> {
     let Some(Tag::List(list)) = field(nbt, FLUIDS) else {
-        return 0;
+        return None;
     };
     let Some(Tag::Compound(entry)) = list.first() else {
-        return 0;
+        return None;
     };
     let ours = matches!(
         field(entry, "Fluid"),
         Some(Tag::String(fluid)) if fluid.to_string_lossy() == BLOOD
     );
     if !ours {
-        return 0;
+        return None;
     }
     match field(entry, "Amount") {
-        Some(Tag::Int(amount)) => (*amount).clamp(0, TANK_CAPACITY),
-        _ => 0,
+        Some(Tag::Int(amount)) => Some(*amount),
+        _ => None,
     }
+}
+
+/// The blood in the entity's first tank, clamped to the capacity the machine holds.
+pub(crate) fn read_tank(nbt: &Compound) -> i32 {
+    read_tank_raw(nbt).unwrap_or(0).clamp(0, TANK_CAPACITY)
 }
 
 /// Write the first tank back in the pin's `fluids` shape, an empty tank as

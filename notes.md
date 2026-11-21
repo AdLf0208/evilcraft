@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: repair loop, slice 2: Blood Infuser)
+# evilcraft — EvilCraft: the blood loop (slice 1: repair loop, slice 2: Blood Infuser, slice 3: the tank in the dropped machine)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -539,7 +539,7 @@ the phase failed on exactly that), and it now proves **both** machines' loot tab
 | promise/bowl family (`bowl_of_promises_*`, `promise_acceptor_*`, speed/efficiency promises) | not ported | the promise items are carried as machine upgrades only; their crafting chain is a later slice |
 | jar recipes for `blood_chest` / `blood_extractor` / `blood_infusion_core` | not ported | their ingredients (`hardened_blood_shard`, `dark_gem`, `dark_spike`, `dark_power_gem`) are not carried yet — gap 1 |
 | 31 of the jar's 40 infuser recipes | not ported | their input or output is an evilcraft item this package does not carry; two are unreachable upstream (defects below) |
-| `copy_tank_data` (the tank in the dropped block) | not ported | `Hooks::block_drops` + `minecraft:block_entity_data` is the campaign's proven route (`rftoolsutility` 0.2.1) — the next slice |
+| `copy_tank_data` (the tank in the dropped block) | tested | O/P (6,500 mB broken, carried, re-placed; an empty chest carries nothing; a 20,000 mB payload clamps to 10,000) — slice 3 |
 | projectile kills giving blood | not ported | `mob_killed` at this pin hears melee, sweep and spear (gap 4) |
 | curse roll on repair | not ported | gap 2 (unchanged) |
 | `experience` on infusion | not ported | upstream stores `xp` and drops it when the result is taken; a mod content menu has no slot-take hook to hang that on (deviation 1) |
@@ -627,3 +627,210 @@ anywhere (the infuser's own `input_item` object is this mod's recipe type, which
 mod's own and accepts), no `"conditions": [ … ]` loot array, and both `requires_tool` blocks are in
 `minecraft:mineable/pickaxe`. The value is left as the jar-verified bytes so the delivered package stays
 byte-identical to the game build that produced the e2e evidence.
+
+## Slice 3 — the tank in the dropped machine (2026-11-21)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.3**
+(0.2.2 was the last build this package had before the slice; the registry entry and the PR are the
+orchestrator's).
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap list, item 5, unchanged in the slice-2 section:
+
+> **`evilcraft:copy_tank_data`** (the loot function that carries the tank into the dropped block) has no
+> Horizon equivalent; the block drops bare.
+
+It is the jar's own behaviour for **both** machines: `data/evilcraft/loot_table/blocks/blood_chest.json`
+and `…/blood_infuser.json` both run `minecraft:copy_name` then `evilcraft:copy_tank_data`
+(`LootFunctionCopyTankData`). Upstream source read for this slice:
+<https://raw.githubusercontent.com/CyclopsMC/EvilCraft/master/src/main/java/org/cyclops/evilcraft/loot/functions/LootFunctionCopyTankData.java>
+(the `master` branch's file, fetched 2026-11-21 — a raw fetch, so no commit hash is pinned; the two loot
+tables were read from the jar itself, `ports/_shared/licence-cache/evilcraft-1.21.1-neoforge-1.2.100.jar`).
+Its `run` copies the block entity's tank — and only the tank — into the item's fluid handler, setting the
+item tank's capacity first; nothing else from the block entity travels. Blood is the mod's currency, so a
+machine that loses its whole tank to a pickaxe is the gap a player notices first.
+
+**Tier:** `deep` still governs the port; this slice is a `machines`/`logic` family inside it — a drop
+listener and an item Part on the two machines, no new block, machine, entity or renderer. It does not
+exceed the tier.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Drop listener | `Hooks::block_drops` on both machines' blocks: the block entity's saved data is read from the event (`level.block_entity_data`) and the tank written onto the machine's own drop as `minecraft:block_entity_data` | `LootFunctionCopyTankData`, the two loot tables |
+| Placement | `ItemPart::on_block_placed_by` on both machines' items: the placed machine takes the tank its item carried, clamped to 10,000 mB | upstream sets the item tank's capacity before inserting (`IFluidHandlerCapacity.setTankCapacity`) |
+| Rules | `runtime::carried_tank` (an empty tank travels on nothing; a negative amount is not a tank) and `runtime::restored_tank` (the clamp) | `if (!resource.isEmpty())`, the capacity |
+
+Nothing else changed: the payload is the **tank alone**. The engine already spills a mod container's
+stacks as their own item entities when the block is removed
+(`crates/horizon-client/src/game/spill.rs`, `PreRemove::Contents`), so a payload that also carried
+`Items` would put every stack in the world twice — once on the ground, once inside the block when it is
+placed back. Phase O puts a cobblestone in slot 0 and asserts both halves of that: the stack spills
+(`items_left_on_ground: 2`), and the payload has no `Items` key and the replaced chest's slots are empty.
+
+### The item's shape
+
+```text
+evilcraft:blood_chest  components: {"minecraft:block_entity_data":
+                                     {id: "evilcraft:blood_chest",
+                                      fluids: [{Amount: 6500, Fluid: "evilcraft:blood"}]}}
+```
+
+The `id` is the block entity **type**'s registry id (the same string as the block), because
+`TypedEntityData.loadInto` only loads a payload that names the block entity it is placed as. This is the
+route the campaign already proved for a machine's buffers (`industrialforegoing` 0.2.2,
+`rftoolsutility` 0.2.1); the difference here is the container half above.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice3.log` (the three tests written, `carried_tank`/`restored_tank` stubbed to
+`None`/`0`):
+
+```
+test result: FAILED. 26 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+---- runtime::tests::a_broken_machine_carries_its_tank_and_an_empty_one_carries_nothing stdout ----
+thread '…' panicked at src/runtime.rs:391:9:
+assertion `left == right` failed
+  left: None
+ right: Some(6500)
+
+---- runtime::tests::a_carried_tank_comes_back_whole stdout ----
+thread '…' panicked at src/runtime.rs:400:48:
+a filled tank travels
+
+---- runtime::tests::a_doctored_tank_is_clamped_to_the_capacity_when_it_is_placed stdout ----
+thread '…' panicked at src/runtime.rs:407:9:
+assertion `left == right` failed
+  left: 0
+ right: 10000
+```
+
+Green: `sdk-test.log` — **33 passed, 0 failed** (30 before the slice; the three new ones plus four in
+`src/tank.rs`: the payload holds the id and the tank and nothing else, an empty machine carries nothing,
+a doctored payload is clamped, and each machine names its own block). `sdk-clippy.log`:
+`cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+The four `tank.rs` tests are the ones that would catch a regression of the two traps this slice had to
+respect: a payload that grows an `Items` key (`a_broken_machine_carries_only_its_tank` asserts exactly two
+keys) and a payload accepted past the capacity.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 3/29** (`EXIT:101`) | `sdk-test-red-slice3.log` |
+| tests (green) | `cargo test` | **33 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 455 API uses, 14 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **170,472 B**, sha256 `fde8475d…3590`, `cmp` identical, 62 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8a` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | job report |
+| artifact record | `sdk-artifact-0.2.3.txt` | bytes/sha/entries/manifest/runtime sha + check and fits lines | `sdk-artifact-0.2.3.txt` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-732cfde441bf`, with the log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/` and `horizon-mod.toml` are byte-identical to
+the port (`diff -r`/`cmp` empty, `version = "0.2.3"`), so the game ran the sources this package is built
+from.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` | **`PASS` + `EXIT:0`** (A, A2, B–F, H–P) | `e2e-launcher.log` |
+| control (no package at all) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the control game has neither item and both blocks stay `minecraft:air`, then the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C (*the pickaxe was not repaired … damage 216*) | `e2e-launcher-selftest.log` |
+| selftest (slice 2) | `SELFTEST=infuser` | **`FAIL` + `EXIT:1`** at K (*the bone was not infused …*) | `e2e-launcher-selftest-infuser.log` |
+| selftest (this slice) | `SELFTEST=tank` | **`FAIL` + `EXIT:1`** at O (*the dropped chest carries none mB, expected 6500*) | `e2e-launcher-selftest-tank.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=5 ok=5 missing-exit=0 bad-exit=0`
+(exit 0).
+
+Transcript of the two new phases (verbatim from `e2e-launcher.log`):
+
+```
+== N: both machines break into themselves (loot tables and the mineable tag) ==
+  evilcraft:blood_infuser: mined with a pickaxe, 1 dropped, 0 picked up
+  evilcraft:blood_chest: mined with a pickaxe, 1 dropped, 0 picked up
+== O: a broken machine's item carries its blood tank ==
+  Blood Chest [202, 101, -4]: tank 6500/10000 mB, container empty@0, slots [0:minecraft:cobblestone@0], t=8080
+  break: {"block":"minecraft:air","drops":{"evilcraft:blood_chest":1,"minecraft:cobblestone":1},"picked_up":{},"items_left_on_ground":2}
+  the dropped evilcraft:blood_chest: Player59308 has the following entity data: {components: {"minecraft:block_entity_data": {id: "evilcraft:blood_chest", fluids: [{Amount: 6500, Fluid: "evilcraft:blood"}]}}, count: 1, id: "evilcraft:blood_chest"}
+  the picked-up chest carries 6500 mB of evilcraft:blood in evilcraft:blood_chest, 0 stack(s)
+  the cobblestone the chest held spilled on its own (2 item(s) left on the ground)
+  Blood Chest [202, 101, -8]: tank 6500/10000 mB, container empty@0, slots [], t=8304
+  placed again: tank 6500/10000 mB, slots empty
+== P: an empty chest carries nothing, and a doctored payload is clamped ==
+  Blood Chest [206, 101, -4]: tank 0/10000 mB, container empty@0, slots [], t=8352
+  break: {"block":"minecraft:air","drops":{"evilcraft:blood_chest":1},"picked_up":{},"items_left_on_ground":1}
+  the dropped evilcraft:blood_chest: Player59308 has the following entity data: {count: 1, id: "evilcraft:blood_chest"}
+  an empty chest's item carries no block entity data: '{count: 1, id: "evilcraft:blood_chest"}'
+  Blood Chest [206, 101, -8]: tank 0/10000 mB, container empty@0, slots [], t=8538
+  placed again: tank 0/10000 mB
+  the doctored chest: Player59308 has the following entity data: {components: {"minecraft:block_entity_data": {id: "evilcraft:blood_chest", fluids: [{Amount: 20000, Fluid: "evilcraft:blood"}]}}, count: 1, id: "evilcraft:blood_chest"}
+  the doctored item asks for 20000 mB of evilcraft:blood
+  Blood Chest [206, 101, -12]: tank 10000/10000 mB, container empty@0, slots [], t=8596
+  206, 101, -12 has the following block data: 10000
+  20,000 mB asked by the item, 10000 mB in the machine (saved 10000)
+```
+
+**Fail-capable, three ways.** (1) `SELFTEST=tank` inverts O's own assertion and exits 1 (log above).
+(2) Phase P is the differential on the same block, the same survival break and the same block entity
+path: a chest with **nothing** in its tank drops an item with no payload and places back at 0, so the tank
+in O can only come from the listener reading the block entity. (3) The whole-package control
+(`CONTROL=1 GAME=$CONTROL_GAME`) leaves both ids unknown. A *fourth* one — the same e2e against a package
+built **without** the listener — was not produced: 0.2.2 (which had no `block_drops`) had already been
+removed by the launcher's version cache, and rebuilding it costs a second game link; phase P is the same
+item state a listener-less break leaves behind, and `SELFTEST=tank` is the assertion inverted.
+
+### Harness facts learned here (record these before the next drop/listener slice pays for them again)
+
+1. **`ctl entities`' `components` is the client's mirror and does not carry a mod component.** An item
+   entity whose stack holds `minecraft:block_entity_data` reads `.item.components: null` there while the
+   server holds it (measured: `/evilcraft probe` showed `applied=Ok(())` on a drop whose mirror was
+   `null`). Read a held stack with `ctl command "data get entity @s SelectedItem"` and parse
+   `… has the following entity data: {…}` — that is the server's own view and it shows the payload.
+2. **`ctl break`'s reply is the server's drop count** (`{block, drops, picked_up, items_left_on_ground}`)
+   and is a sturdier assertion than counting item entities on the client; `items_left_on_ground` is also
+   the container-spill check. `break_into` and `break_survival` now use it.
+3. **`data get block <pos> <path>` prints `<x>, <y>, <z> has the following block data: <value>`
+   (`commands.data.block.query`), not the vanilla `… after scale factor of … is …` form** — that form is
+   only used when a `scale` argument is given.
+4. **A stale chat line is a real false-pass risk**: `SelectedItem` replies are read newest-first, so the
+   helper waits for a line that differs from the previous one (`selected_item_line`), the same fix the
+   infuser readout needed in slice 2.
+5. **The launcher has one global build lock** (`.build.lock`): a `native-build` refuses with *"A native
+   build or cache cleanup is running"* while another agent builds, so retry against `flock -n` rather
+   than in a tight loop.
+
+### Deviations this slice adds
+
+1. **The payload is applied twice on a normal placement, harmlessly.** The engine applies the item's
+   `minecraft:block_entity_data` to the new block entity before `on_block_placed_by` runs (the same
+   behaviour `industrialforegoing` and `rftoolsutility` rely on), and `MachineItem` then writes the tank
+   back only when the clamped value differs from what the machine holds — so a legal payload is written
+   once (by the engine) and a doctored one is corrected by the Part. A machine with no payload is left
+   exactly as the game placed it.
+2. **A dispenser has no placer**, so the Part cannot reach the level to clamp; a dispenser-placed machine
+   carries the payload unclamped until its own first tick, which writes the tank back through
+   `write_tank` (clamped). No carried case is reachable through a dispenser (`block_entity_data` is only
+   set by `/give`, creative pick-block or a drop).
+3. **An explosion cannot carry the tank**: the event's block entity is gone for an explosion, exactly as
+   upstream's `LootContextParams.BLOCK_ENTITY` is absent there, so a blown-up machine drops bare. This is
+   upstream behaviour, not a gap.
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `copy_tank_data` on `blood_chest` and `blood_infuser` | **tested** | O (6,500 mB in, 6,500 on the item, 6,500 back after placing), P (empty → nothing; 20,000 → 10,000 in the readout *and* in the saved data) |
+| the container's stacks on a broken machine | **tested (the opposite)** | O: the cobblestone in slot 0 spills as its own item entity, the payload has no `Items`, the replaced chest's slots are empty |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port

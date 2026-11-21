@@ -40,6 +40,18 @@
 #  M  the container slot empties a filled extractor into the tank;
 #  N  the infuser breaks back into itself (its loot table and the minecraft:mineable tag).
 #
+# Slice 3 — the tank on the broken machine's own item (`evilcraft:copy_tank_data`):
+#  O  a chest holding 6,500 mB is broken in survival: its dropped item carries
+#     `minecraft:block_entity_data` tagged `evilcraft:blood_chest` with
+#     `fluids=[{Fluid:"evilcraft:blood", Amount:6500}]` and **no** `Items` (the engine
+#     spills the cobblestone that was in slot 0 as its own item entity), and placing that
+#     item again reads `tank 6500/10000` with empty slots — the blood, and nothing else,
+#     makes the round trip;
+#  P  the same chest broken **empty** carries no block entity data and places back at
+#     0 mB (the payload is the listener's, not something the engine adds), and an item
+#     doctored to 20,000 mB (`give … Amount:20000`) places a chest clamped to
+#     10,000 mB both in `/evilcraft info` and in the block entity's own `fluids`.
+#
 # The operator gate on `/evilcraft info|infuser` is unit-tested
 # (`the_readout_needs_an_operator_and_names_only_this_chest`) and registered at level 2;
 # its in-game leg needs a LAN guest at level 0 (`lan open 0`), because an integrated
@@ -54,9 +66,12 @@
 # CONTROL=1 (the launcher run sets `CONTROL_GAME`) first launches the same Nightly
 # **without** the package, where the ids must be unknown.
 #
-# SELFTEST=1 flips C's assertion and SELFTEST=infuser flips K's (each must FAIL),
-# proving both scenarios can fail. Phase I is the infuser's own differential: the same
-# machine, the same bone and a full tank do nothing at tier 0 and infuse at tier 3.
+# SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's and SELFTEST=tank flips O's
+# (each must FAIL), proving the scenarios can fail. Phase I is the infuser's own
+# differential: the same machine, the same bone and a full tank do nothing at tier 0 and
+# infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing in its
+# tank drops an item that carries no payload, which is exactly what a break the listener
+# never hears leaves behind.
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${EC_DEBUG:-}" ] || set -x
@@ -94,7 +109,7 @@ command -v jq >/dev/null || { echo "missing jq (every assertion parses a ctl rep
 [ -x "$GAME" ] || { echo "missing horizon-client: $GAME" >&2; exit 1; }
 [ -d "$RES/assets" ] || { echo "missing prepared resources: $RES" >&2; exit 1; }
 
-SCRATCH=$(mktemp -d /tmp/opencode/evilcraft-home.XXXXXX)
+SCRATCH=$(mktemp -d "${E2E_TMP:-/tmp/opencode}/evilcraft-home.XXXXXX")
 export HORIZON_HOME=$SCRATCH/game
 export HORIZON_LAUNCHER_HOME=$SCRATCH/launcher
 export XDG_DATA_HOME=$SCRATCH/data
@@ -167,6 +182,9 @@ info() { # info X Y Z
     ctl wait 12 >/dev/null
     INFO_LINE=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'Blood Chest' || true)
     [ -n "$INFO_LINE" ] || fail "no /evilcraft info reply"
+    # A readout replaces the previous one: a stack that has left slot 0 must not still read
+    # as there because an earlier line named it.
+    unset "${!SLOT@}" 2>/dev/null || true
     eval "$(python3 "$PORT/tools/parse_info.py" "$INFO_LINE")"
     [ "${ok:-0}" = 1 ] || fail "the info line did not parse: $INFO_LINE"
     echo "  $INFO_LINE" >&2
@@ -338,6 +356,90 @@ infuse() { # input output count cost ticks
     [ "$TANK" = "$want" ] || fail "$input left $TANK mB in the tank, expected $want ($cost spent)"
     echo "  $input -> $output x$count for $cost mB in $ticks ticks" >&2
     take_output "$output" "$count"
+}
+
+# Break a machine in survival and keep what the break reported: `BREAK` is `ctl break`'s
+# reply (`block`, `drops`, `picked_up`, `items_left_on_ground`), which is the server's own
+# count of what the loot tables rolled.
+break_survival() { # x y z block
+    local x=$1 y=$2 z=$3 block=$4 held name
+    ctl command "execute in minecraft:the_end run tp @s $((x - 3)).5 101 $((z + 1)).5" >/dev/null
+    ctl wait 6 >/dev/null
+    held=$(ctl inventory | jq -r '.held.item // ""')
+    [ "$held" = "minecraft:diamond_pickaxe" ] || fail "the pickaxe is not in hand: '$held'"
+    BREAK=$(ctl break "$x" "$y" "$z") || fail "$block did not break"
+    ctl wait 10 >/dev/null
+    name=$(block_name "$x" "$y" "$z")
+    [ "$name" = "minecraft:air" ] || fail "$block is still $name after mining"
+    [ "$(jq -r --arg i "$block" '.drops[$i] // 0' <<<"$BREAK")" -ge 1 ] \
+        || fail "the survival break of $block dropped nothing: $(jq -c '.drops' <<<"$BREAK")"
+    echo "  break: $(jq -c '{block, drops, picked_up, items_left_on_ground}' <<<"$BREAK")" >&2
+}
+
+# `/data get entity @s SelectedItem`, waiting for the *new* reply: the chat is read newest
+# first, and a fixed wait once read a stale line (the infuser's readout had the same fault).
+# Sets `SELECTED_LINE` and `HELD_COMPONENTS` (the SNBT of the held stack's components).
+selected_item_line() { # [what]
+    local what=${1:-held} prev line i parsed
+    prev=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'has the following entity data' || true)
+    ctl command "data get entity @s SelectedItem" >/dev/null
+    line=$prev
+    for i in $(seq 1 25); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'has the following entity data' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] || fail "no /data get reply for the $what item"
+    SELECTED_LINE=$line
+    parsed=$(sed -n 's/.*entity data: \(.*\)$/\1/p' <<<"$line")
+    [ -n "$parsed" ] || fail "the SelectedItem reply did not parse: $line"
+    HELD_COMPONENTS=$parsed
+    echo "  $what: $line" >&2
+}
+
+# Walk onto the drop, select it in the hotbar and read its components the way the server
+# holds them: `minecraft:item`'s `components` in `ctl entities` is the *client's* mirror and
+# does not carry a mod component (measured on this pin), so the hand is read with
+# `/data get entity @s SelectedItem`.
+pick_hold() { # x y z block
+    local x=$1 y=$2 z=$3 block=$4 slot
+    ctl collect 8 >/dev/null 2>&1 || true
+    ctl wait 10 >/dev/null
+    ctl command "execute in minecraft:the_end run tp @s $x.5 101 $z.5" >/dev/null
+    ctl wait 30 >/dev/null
+    slot=$(ctl inventory | jq -r --arg i "$block" '[.hotbar[] | select(.item == $i) | .slot] | .[0] // ""')
+    [ -n "$slot" ] || fail "the dropped $block was not picked up: $(ctl inventory | jq -c '.hotbar')"
+    ctl select $((slot + 1)) >/dev/null
+    ctl wait 6 >/dev/null
+    selected_item_line "the dropped $block"
+}
+
+# Place the held item at a position, then check the block is there.
+place_held() { # x y z block
+    local x=$1 y=$2 z=$3 block=$4 aim reply name
+    ctl command "execute in minecraft:the_end run tp @s $((x - 2)).5 101 $((z + 1)).5" >/dev/null
+    ctl wait 6 >/dev/null
+    aim=$(ctl look-at-block "$x" $((101 - 1)) "$z" up 2>&1) \
+        || fail "cannot aim at the floor under $x,101,$z: $aim"
+    reply=$(ctl place "$x" 101 "$z" --item "$block" 2>&1) \
+        || fail "ctl place at $x,101,$z failed: $(tr -d '\n' <<<"$reply" | cut -c1-300)"
+    ctl wait 8 >/dev/null
+    name=$(block_name "$x" 101 "$z")
+    [ "$name" = "$block" ] || fail "$block did not place at $x,101,$z (got '$name')"
+}
+
+# `/data get block X Y Z fluids[0].Amount`: the block entity's own saved amount, not the
+# clamped value a readout would print. Sets `SAVED_MB`. A path reply prints
+# `<x>, <y>, <z> has the following block data: <value>` (`commands.data.block.query`).
+saved_tank() { # x y z
+    local line
+    ctl command "data get block $1 101 $3 fluids[0].Amount" >/dev/null
+    ctl wait 10 >/dev/null
+    line=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'has the following block data' || true)
+    [ -n "$line" ] || fail "no data get reply for the tank at $1,101,$3: $(ctl messages 6 | jq -c '.chat')"
+    SAVED_MB=$(sed -n 's/.*has the following block data: \(-\{0,1\}[0-9][0-9]*\)$/\1/p' <<<"$line")
+    [ -n "$SAVED_MB" ] || fail "the data get reply did not parse: $line"
+    echo "  $line" >&2
 }
 
 echo "== launch (The End arena, content + native bundle) =="
@@ -601,25 +703,115 @@ ctl wait 4 >/dev/null
 ctl select 1 >/dev/null
 ctl wait 2 >/dev/null
 break_into() { # x y z block
-    local x=$1 y=$2 z=$3 block=$4 name held before after drops picked
+    local x=$1 y=$2 z=$3 block=$4 name held before after drops picked broken
     ctl command "execute in minecraft:the_end run tp @s $((x - 3)).5 101 $((z + 1)).5" >/dev/null
     ctl wait 6 >/dev/null
     held=$(ctl inventory | jq -r '.held.item // ""')
     [ "$held" = "minecraft:diamond_pickaxe" ] || fail "the pickaxe is not in hand: '$held'"
     before=$(ctl inventory | jq -r --arg i "$block" '.counts[$i] // 0')
-    ctl break "$x" "$y" "$z" >/dev/null || fail "$block did not break"
+    broken=$(ctl break "$x" "$y" "$z") || fail "$block did not break"
     ctl wait 12 >/dev/null
     name=$(block_name "$x" "$y" "$z")
     [ "$name" = "minecraft:air" ] || fail "$block is still $name after mining"
-    # The drop may still be on the ground or already picked up: either proves it.
-    drops=$(ctl entities 8 minecraft:item | jq -r --arg i "$block" '[.entities[] | select(.item.item == $i) | .item.count] | add // 0')
+    # The break's own reply is the server's count of what the loot table rolled; the drop
+    # may still be on the ground or already picked up, and either proves it.
+    drops=$(jq -r --arg i "$block" '.drops[$i] // 0' <<<"$broken")
     after=$(ctl inventory | jq -r --arg i "$block" '.counts[$i] // 0')
     picked=$((after - before))
     [ "$((drops + picked))" -ge 1 ] \
-        || fail "a survival break of $block dropped nothing: ground $(ctl entities 8 minecraft:item | jq -c '[.entities[].item]'), inventory $picked"
-    echo "  $block: mined with a pickaxe, $drops on the ground, $picked picked up" >&2
+        || fail "a survival break of $block dropped nothing: $(jq -c '.drops' <<<"$broken"), inventory $picked"
+    echo "  $block: mined with a pickaxe, $drops dropped, $picked picked up" >&2
 }
 break_into "$IX2" 101 0 "$INFUSER"
 break_into "$CX2" 101 2 "$CHEST"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, and breaks back into itself"
+echo "== O: a broken machine's item carries its blood tank =="
+# Still in survival with the pickaxe, so the chest really drops. A fresh chest, 6,500 mB
+# in it, and one stack of cobblestone in slot 0: the tank must travel on the item and the
+# stack must NOT (the engine spills a mod container's stacks itself, so a payload that
+# carried them would put every one of them in the world twice).
+OX=$((X0 + 2))
+ctl command "clear @s" >/dev/null
+ctl wait 4 >/dev/null
+place_chest "$OX" 101 -4 "$CHEST"
+give_to "$OX" 101 -4 minecraft:cobblestone
+say "evilcraft blood $OX 101 -4 6500"
+ctl wait 12 >/dev/null
+info "$OX" 101 -4
+expect_tank 6500
+[ "${SLOT0_ITEM:-}" = "minecraft:cobblestone" ] || fail "slot 0 holds ${SLOT0_ITEM:-nothing}, expected the cobblestone"
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+break_survival "$OX" 101 -4 "$CHEST"
+pick_hold "$OX" 101 -4 "$CHEST"
+eval "$(python3 "$PORT/tools/parse_components.py" "$HELD_COMPONENTS" "$CHEST")"
+CARRIED=${carried:-none}
+if [ "$SELFTEST" = tank ]; then
+    echo "(selftest=tank: asserting the broken chest carried no tank)"
+    CARRIED=none
+fi
+[ "${ok:-0}" = 1 ] || fail "the dropped chest carries no block entity data: '$HELD_COMPONENTS'"
+[ "$CARRIED" = 6500 ] || fail "the dropped chest carries $CARRIED mB, expected 6500"
+[ "$fluid" = "evilcraft:blood" ] || fail "the dropped chest carries '$fluid', expected evilcraft:blood"
+[ "$items" = 0 ] || fail "the payload carries the chest's own stacks ($items Items key(s)) as well as the tank, so they would double-carry"
+echo "  the picked-up chest carries $CARRIED mB of $fluid in $carrier, $items stack(s)" >&2
+# The cobblestone left the chest as its own item entity, which is why the payload is the
+# tank alone.
+SPILLED=$(jq -r '.items_left_on_ground // 0' <<<"$BREAK")
+[ "$SPILLED" -ge 1 ] || fail "the engine did not spill the chest's cobblestone, so the empty payload slot proves nothing"
+echo "  the cobblestone the chest held spilled on its own ($SPILLED item(s) left on the ground)" >&2
+place_held "$OX" 101 -8 "$CHEST"
+info "$OX" 101 -8
+expect_tank 6500
+[ "$CAPACITY" = "$TANK_CAPACITY" ] || fail "the replaced chest reports a $CAPACITY mB tank"
+[ -z "${SLOT0_ITEM:-}" ] || fail "the replaced chest came back holding ${SLOT0_ITEM}, so its stacks were carried twice"
+echo "  placed again: tank $TANK/$CAPACITY mB, slots empty"
+
+echo "== P: an empty chest carries nothing, and a doctored payload is clamped =="
+# The same block, the same break, a tank with nothing in it: the item carries no payload
+# at all. That is what a break whose block entity the listener could not read leaves
+# behind, and it is where the tank in O can only have come from the listener.
+PX=$((X0 + 6))
+ctl command "clear @s" >/dev/null
+ctl wait 4 >/dev/null
+place_chest "$PX" 101 -4 "$CHEST"
+info "$PX" 101 -4
+expect_tank 0
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+break_survival "$PX" 101 -4 "$CHEST"
+pick_hold "$PX" 101 -4 "$CHEST"
+if python3 "$PORT/tools/parse_components.py" "$HELD_COMPONENTS" "$CHEST" | grep -q '^ok=1$'; then
+    fail "an empty chest's item carries a block entity data payload: $HELD_COMPONENTS"
+fi
+echo "  an empty chest's item carries no block entity data: '$HELD_COMPONENTS'" >&2
+place_held "$PX" 101 -8 "$CHEST"
+info "$PX" 101 -8
+expect_tank 0
+echo "  placed again: tank $TANK/$CAPACITY mB"
+# A hand-written payload past the capacity: the item asks for 20,000 mB and the machine
+# can hold 10,000, so the placement clamps it — in the readout and in the saved data.
+ctl command "clear @s" >/dev/null
+ctl command "give @s $CHEST[minecraft:block_entity_data={id:\"$CHEST\",fluids:[{Fluid:\"evilcraft:blood\",Amount:20000}]}]" >/dev/null
+ctl wait 8 >/dev/null
+DOCTORED=$(ctl inventory | jq -r --arg i "$CHEST" '[.hotbar[] | select(.item == $i) | .slot] | .[0] // ""')
+[ -n "$DOCTORED" ] || fail "the doctored chest is not in the hotbar: $(ctl inventory | jq -c '.hotbar')"
+ctl select $((DOCTORED + 1)) >/dev/null
+ctl wait 4 >/dev/null
+selected_item_line "the doctored chest"
+eval "$(python3 "$PORT/tools/parse_components.py" "$HELD_COMPONENTS" "$CHEST")"
+[ "${carried:-none}" = 20000 ] || fail "the doctored item asks for ${carried:-none} mB, not 20000"
+echo "  the doctored item asks for $carried mB of $fluid" >&2
+place_held "$PX" 101 -12 "$CHEST"
+info "$PX" 101 -12
+expect_tank "$TANK_CAPACITY"
+saved_tank "$PX" 101 -12
+[ "$SAVED_MB" = "$TANK_CAPACITY" ] \
+    || fail "the placed chest's own tank holds $SAVED_MB mB, expected the clamped $TANK_CAPACITY"
+echo "  20,000 mB asked by the item, $TANK mB in the machine (saved $SAVED_MB)" >&2
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, and a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks), places back with 6,500 mB, while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000"

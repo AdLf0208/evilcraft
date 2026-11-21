@@ -140,3 +140,57 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 4/4 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 3 — the tank in the broken machine (2026-11-21), 0.2.3
+
+Pin **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Every step ran through `ports/tools/build-slot.sh` (`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no
+`--target-dir`). Logs are under `ports/_shared/evidence/evilcraft/` unless a row says otherwise.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| TDD red | `cargo test` (tests written, rules stubbed) | `FAILED. 26 passed; 3 failed` — `left: None / right: Some(6500)`, `a filled tank travels`, `left: 0 / right: 10000` | `sdk-test-red-slice3.log` |
+| unit tests | `cargo test` | **33 passed, 0 failed** | `sdk-test.log` |
+| fmt | `cargo fmt --check` | clean | `sdk-clippy.log` |
+| clippy | `cargo clippy --all-targets -- -D warnings` | 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 455 API uses, 14 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **170,472 B** sha256 `fde8475d6769321c7d717b4c3254ca881c6b053c90810e86c338661341273590`, `cmp` identical, 62 entries, no packed `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` (sha printed first) | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, 170,472 B, same sha, `EXIT:0` | `sdk-check.log` |
+| fit, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` (sha printed first) | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fit, a different build | `cargo horizon-mod fits evilcraft.hmod --build 0b14f8a` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | unchanged: 1 unverified `"rolls": 1.0` in slice 1's chest table, 3 fatal shapes clean | job report |
+| artifact record | `sdk-artifact-0.2.3.txt` | bytes/sha/entries/manifest/runtime sha, check and fits lines | `sdk-artifact-0.2.3.txt` |
+
+### In-game (launcher-built game, `ports/_shared/evidence/evilcraft-e2e/`)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-732cfde441bf` (`Compiling evilcraft (1 of
+1)`); the export's `src/`, `data/` and `horizon-mod.toml` are byte-identical to the port (`diff -r`/`cmp`
+empty, `version = "0.2.3"`).
+
+| Leg | Command | Result | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` | **`PASS` + `EXIT:0`** — A, A2, B–F, H–P | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — *no chest or infuser item, both blocks stayed `minecraft:air`*, then the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (slice 2) | `SELFTEST=infuser` | **`FAIL` + `EXIT:1`** at K | `e2e-launcher-selftest-infuser.log` |
+| selftest (this slice) | `SELFTEST=tank` | **`FAIL` + `EXIT:1`** at O (*the dropped chest carries none mB, expected 6500*) | `e2e-launcher-selftest-tank.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=5 ok=5 missing-exit=0 bad-exit=0`
+(exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- O: a chest with **6,500 mB** and one cobblestone in slot 0, broken in survival with a diamond pickaxe,
+  drops **one chest** whose item carries `minecraft:block_entity_data` `{id: "evilcraft:blood_chest",
+  fluids: [{Amount: 6500, Fluid: "evilcraft:blood"}]}` — **no `Items`** (the cobblestone spilled as its
+  own item entity, `items_left_on_ground: 2`). Placed again: `tank 6500/10000 mB`, slots empty.
+- P: the same chest broken **empty** drops an item with **no** payload and places back at `0/10000`; an
+  item doctored to `Amount: 20000` places a chest that reads `10000/10000` and whose own saved
+  `fluids[0].Amount` is `10000` (`/data get block`), not just the clamped readout.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 5/5 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
