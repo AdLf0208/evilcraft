@@ -1,0 +1,10 @@
+{
+  "item": true,
+  "properties": {
+    "explosion_resistance": 0.5,
+    "hardness": 0.5,
+    "map_color": 4,
+    "sounds": "minecraft:stone"
+  },
+  "template": "minecraft:white_carpet"
+}

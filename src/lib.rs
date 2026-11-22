@@ -8,14 +8,17 @@
 //!
 //! The blood chest is a block entity Part (its slots, tank, tick and screen), the
 //! extractor an item Part (its tooltip); the kill, the two machines' drops and the
-//! harness commands are global hooks. A kill is heard on `living_drops` — every cause of
-//! death, so an arrow counts — and only when its damage source's causing entity is a
-//! player. The mod keeps no state of its own: the tank lives in the block entity's saved
-//! compound, the extractor's blood in the stack's components, and a broken machine's tank
-//! travels on its own item as `minecraft:block_entity_data` ([`tank`]).
+//! harness commands are global hooks. A blood stain is a block entity with a five-bucket
+//! tank, and the extractor's crouching click on one draws that blood into the item. A kill
+//! is heard on `living_drops` — every cause of death, so an arrow counts — and only when
+//! its damage source's causing entity is a player. The mod keeps no state of its own: the
+//! tanks live in the block entities' saved compounds, the extractor's blood in the stack's
+//! components, and a broken machine's tank travels on its own item as
+//! `minecraft:block_entity_data` ([`tank`]).
 pub mod blood;
 pub mod infuser;
 pub mod runtime;
+pub mod stain;
 pub mod tank;
 
 use mod_api::{
@@ -47,6 +50,22 @@ impl Hooks for Mod {
         // The chest's own item: a broken chest carries its tank, a placed one takes it
         // back clamped (upstream's `copy_tank_data` + `onBlockPlacedBy`).
         tank::Machine::Chest.register(r);
+
+        // The Blood Stain: its own block entity type and Part, and its five-bucket tank.
+        // It has no tick — a stain is a splash that waits for an extractor — so the click
+        // below is the whole of its behaviour in this slice.
+        let stain = r.block_key(runtime::STAIN);
+        let kind = r
+            .block_entity_type(stain::STAIN_ENTITY)
+            .blocks(&[stain::STAIN_BLOCK])
+            .build();
+        r.block_entity_part(&kind, stain::Stain)
+            .expect("evilcraft declares the blood stain's own block entity type");
+        r.block_fluids(&stain, stain::tanks());
+        // A crouching right-click with the extractor draws a stain's blood into the item
+        // (upstream's `ItemBloodExtractor.onItemUseFirst`): the second Part on the item,
+        // beside its tooltip.
+        r.item_part(extractor, stain::ExtractorDraw);
 
         // The Blood Infuser: its own block entity type and Part, its seven slots, its
         // tank, and the recipe type its data files are written in. The recipe type must

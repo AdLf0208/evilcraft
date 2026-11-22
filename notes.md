@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: repair loop, slice 2: Blood Infuser, slice 3: the tank in the dropped machine)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -1000,6 +1000,237 @@ earlier slices'.)
 | melee kills still fill (the regression guard) | **tested** | E: 100..799 (unchanged phase) |
 | `/kill` and the environment fill nothing | **tested** | R's `/kill` cleanup + phase C's empty-tank control; unit `the_environment_and_kill_command_fill_nothing` |
 | projectile kills giving blood | **tested** | Q (was `not ported`) |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 5 — the Blood Stain (`BlockBloodStain`, `BlockEntityBloodStain`) (2026-11-22)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.5**.
+The registry entry, the PR and the ledger stay the orchestrator's.
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap 7, unchanged since:
+
+> No **blood stain**, colossal chest, purifier, blood infuser, dark ore, undead wood,
+> spirits/vengeance, werewolves, promises/bowls, brooms, or the environmental accumulator —
+> the rest of the jar.
+
+`FINDINGS.md` (read from `BlockBloodStain`, `BlockEntityBloodStain`, `ItemBloodExtractor.onItemUseFirst`)
+states the family precisely: a mob's **fall death** leaves a stain holding `bloodMBPerHP = 20` × its max
+health mB in a **5,000 mB** tank, and a **crouching right-click with a Blood Extractor** drains it into the
+extractor; a stain a committed change drains to 0 removes its block. It is the source end of the blood
+economy the port already ships (extractor → infuser/chest), it is self-contained, and it is provable in a
+game with one click — so it is the highest-value family left that fits the tier.
+
+**Tier:** `deep` still governs the port; this slice is a `logic`/`machines` family inside it — one block
+with a block entity and a small tank, and one item-use hook. No new machine, entity, renderer or
+dimension.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Block | `evilcraft:blood_stain` — the `minecraft:white_carpet` template (a 1-pixel shape on the floor, sturdy support below), `hardness 0.5`, `explosion_resistance 0.5`, `SoundType.STONE`, its item | jar block + `BlockBloodStain`, `BlockBloodStainConfig` |
+| Tank | one **5,000 mB** tank in the block entity's saved `fluids` list, every face reaching it, **no input** (a pipe can drain, never fill), exactly upstream's `BlockEntityBloodStain.FluidHandler` (`insert` answers 0) | `BlockEntityBloodStain.CAPACITY`, its `FluidHandler` |
+| Click | `ItemPart::use_on` on `evilcraft:blood_extractor`: a **crouching** right-click on a stain moves `min(stain, extractor room)` mB into the item; standing, another block, a full extractor and an empty stain all answer `Pass` | `ItemBloodExtractor.onItemUseFirst` |
+| Removal | a click that empties the stain removes its block (`LevelRef::remove_block`) | `BlockEntityBloodStain.setAmount(0, true)` |
+| Data | the jar's `blockstates/blood_stain.json` (12 weighted, rotated variants), `models/block/blood_stain_0..2.json`, `textures/block/blood_stain_0..2.png`, `textures/item/blood_stain.png`, its item model (the jar's parent is `cyclopscore:item/flat`, which this package does not carry), the lang keys, the creative-tab row, and the jar's `data/minecraft/tags/block/replaceable.json` | the jar's own files |
+| Command | `/evilcraft stain <pos>` (the tank readout) and `/evilcraft blood <pos> <amount>` now reaching the stain, clamped to its own 5,000 mB | harness only (upstream has none) |
+
+The rules are [`crate::runtime::stain_draw`] (`StainDraw { stain, extractor, moved }` and
+`drains_the_stain`), `STAIN`/`STAIN_TANK`; the game side is [`crate::stain`]; the capacity-aware tank
+readers are `blood::read_tank_with`/`write_tank_with` (the chest and infuser keep their 10,000 mB ones).
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice5.log` (the four tests written, `stain_draw` stubbed to a zero move):
+
+```
+test result: FAILED. 36 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_crouching_click_moves_only_the_room_the_extractor_has stdout ----
+thread '…' panicked at src/runtime.rs:512:9:
+assertion `left == right` failed: the extractor had room for 1,000 mB
+  left: 0
+ right: 1000
+
+---- runtime::tests::a_stain_with_less_than_the_room_empties_into_the_extractor stdout ----
+thread '…' panicked at src/runtime.rs:521:9:
+assertion `left == right` failed
+  left: (0, 0, 0)
+ right: (1000, 0, 1000)
+
+---- runtime::tests::a_full_extractor_takes_nothing_and_leaves_the_stain_alone stdout ----
+thread '…' panicked at src/runtime.rs:529:9:
+assertion `left == right` failed
+  left: 0
+ right: 3500
+
+---- runtime::tests::a_stain_never_holds_more_than_five_buckets stdout ----
+thread '…' panicked at src/runtime.rs:539:9:
+assertion `left == right` failed: a doctored stain gives at most its own tank
+  left: (0, 0, 0)
+ right: (5000, 0, 5000)
+```
+
+Green: `sdk-test.log` — **40 passed, 0 failed**; `sdk-clippy.log` — `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 4/40** (`EXIT:101`) | `sdk-test-red-slice5.log` |
+| tests (green) | `cargo test` | **40 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 494 API uses, 16 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **182,285 B**, sha256 `7a1ead32…0e69bc`, `CMP-IDENTICAL`, 75 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | unchanged: slice 1's one `"rolls": 1.0`; the new block file and tag are not recipes/loot | job report |
+| artifact record | `sdk-artifact-0.2.5.txt` | bytes/sha/entries/manifest/runtime sha, check and fits lines, the packed `data/` list | `sdk-artifact-0.2.5.txt` |
+
+The two `fits` runs name the **full** commit: with `--build 0a875da` the tool first asks GitHub for the
+release list, and that was rate-limited (`403`) and connection-reset twice on 2026-11-22, while the full
+sha is answered from `.horizon/cache/<sha>/` and prints the same `0a875da  made for`.
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-f476825c075c`, with the log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/` and `horizon-mod.toml` are byte-identical to
+the port (`diff -r`/`cmp` empty, `version = "0.2.5"`), so the game ran the sources this package is built
+from.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** (A, A2, B–F, H–U) | `e2e-launcher.log` |
+| control (no package at all) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C (*the pickaxe was not repaired … damage 218*) | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=stain` | **`FAIL` + `EXIT:1`** at S (*the crouching click moved 0 mB into the extractor, expected exactly the 1000 mB room it had*) | `e2e-launcher-selftest-stain.log` |
+| selftest (slice 2, 0.2.3) | `SELFTEST=infuser` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-infuser.log` |
+| selftest (slice 3) | `SELFTEST=tank` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-tank.log` |
+| selftest (slice 4) | `SELFTEST=blood` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-blood.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=7 ok=7 missing-exit=0 bad-exit=0`
+(exit 0).
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== S: a crouching click with the extractor draws a stain's blood into it ==
+  placed evilcraft:blood_stain at 204,101,-10
+  Blood Stain [204, 101, -10]: tank 0/5000 mB, t=8972
+  Blood Stain [204, 101, -10]: tank 3500/5000 mB, t=8990
+  the stain's saved tank: 204, 101, -10 has the following block data: [{Amount: 3500, Fluid: "evilcraft:blood"}]
+  Blood Extractor held: 4000/5000 mB, t=9030.
+  crouch + right-click on 204,101,-10 (aim on evilcraft:blood_stain)
+  Blood Extractor held: 5000/5000 mB, t=9070.
+  Blood Stain [204, 101, -10]: tank 2500/5000 mB, t=9077
+  extractor 4000 -> 5000 mB, stain 3500 -> 2500 mB (moved exactly 1000)
+== T: a standing click moves nothing; a crouching click on stone moves nothing ==
+  right-click on 204,101,-10 (aim on evilcraft:blood_stain)
+  Blood Extractor held: 4000/5000 mB, t=9123.
+  Blood Stain [204, 101, -10]: tank 3500/5000 mB, t=9129
+  standing: extractor 4000 mB, stain 3500 mB (nothing moved)
+  crouch + right-click on 204,101,-10 (aim on evilcraft:blood_stain)
+  Blood Extractor held: 5000/5000 mB, t=9161.
+  Blood Stain [204, 101, -10]: tank 2500/5000 mB, t=9167
+  crouching: extractor 4000 -> 5000 mB, stain 3500 -> 2500 mB (the same click, sneaking)
+  crouch + right-click on 204,101,-8 (aim on minecraft:stone)
+  Blood Extractor held: 4000/5000 mB, t=9226.
+  the same crouching click on minecraft:stone: extractor still 4000 mB
+== U: a drained stain removes its block, and vanilla may replace it ==
+  Blood Stain [204, 101, -10]: tank 400/5000 mB, t=9256
+  crouch + right-click on 204,101,-10 (aim on evilcraft:blood_stain)
+  Blood Extractor held: 5000/5000 mB, t=9289.
+  a stain drained to 0 is gone (minecraft:air), and the extractor took its 400 mB (5000 mB)
+  placed evilcraft:blood_stain at 204,101,-12
+  right-click on 204,101,-12 (aim on evilcraft:blood_stain)
+  a stone placed onto a stain landed above it (evilcraft:blood_stain stays, minecraft:stone above): minecraft:replaceable is inert at this pin
+```
+
+**Fail-capable, four ways.** (1) `SELFTEST=stain` inverts S's own assertion and exits 1 (log above).
+(2) Phase T is the crouch rule's differential on the same stain and the same extractor: standing moves
+nothing, and the *same* click crouching moves 1,000. (3) Phase T's second half is the block rule's
+differential: the same crouching click on `minecraft:stone` moves nothing. (4) The whole-package control
+leaves every id unknown, so S cannot even place the stain.
+
+### Harness facts learned here (record these before the next thin-block slice pays for them again)
+
+1. **`ctl look-at-block` cannot aim at a one-pixel block, and neither can `ctl interact`.** Both aim at
+   the *cell's* centre (`pos + 0.5`), which for a stain is above its shape (`y .. y+0.0625`), so the ray
+   sails over it: `no face of block [204, 101, -10] is visible from here`. A stain is aimed at with
+   `ctl look-at <x+0.5> <y+0.02> <z+0.5>` (a point inside the shape) and clicked with `ctl mouse right
+   click`; `ctl looking-at` then proves the crosshair is on `evilcraft:blood_stain`.
+2. **A cell's centre is `+0.5` in *every* axis — not string concatenation.** `"$z.5"` for `z=-10` is
+   `-10.5`, which is the centre of cell **-11**: the first aim was half a block off in z, read
+   `minecraft:stone`, and cost a run. The helper computes the centre with `awk`.
+3. **`ctl place` reports the block two ticks after its click**, so a click the client dropped (or the
+   server applied a tick late) reads as *the block did not change*; the stain's placement helper re-reads
+   after 20 ticks and only then falls back to a plain right-click on the floor, printing what it saw.
+4. **`minecraft:replaceable` is not read at this pin.** It is a per-state block fact in the game's
+   `facts` export (a mod block inherits its *template's* flag), and `BlockProperties` in
+   `horizon-mods/src/content.rs` has no `replaceable` key, so a content block cannot set it. Measured: a
+   stone placed onto a stain lands **above** it (phase U). The jar's `data/minecraft/tags/block/replaceable.json`
+   is carried (it is upstream's own data) and is **inert** here; the gap is
+   `blocked(replaceable-not-expressible)` for that one behaviour.
+5. **A busy server can answer `/evilcraft held` five seconds late** (the chat is read newest-first, so a
+   short budget reads the previous readout). The helper's budget is now 12 s of ticks; measured on
+   `SELFTEST=stain`'s first attempt, where phase R timed out on a reply that arrived a moment later.
+6. **An enderman in the cell blocks a placement, and the End spawns them.** `ctl place`'s
+   *the block did not change (blocked by an entity, or the item cannot be placed)* was literal: a dump
+   showed five endermen around the player, and the fallback click failed the same way. The stain's
+   placement helper kills non-player entities within 8 blocks of the player first, as `arena` does at the
+   start of the run; a mob's own phase must therefore not expect a mob it summoned earlier.
+
+### Deviations this slice adds
+
+1. **The stain is the `minecraft:white_carpet` template.** Its shape is vanilla's carpet (a 1-pixel box
+   across the cell), which is upstream's `Block.box(0, 0, 0, 16, 1, 16)` exactly, but its **collision**
+   is the carpet's 1-pixel box where upstream is `noCollision()`. The model, the blockstate and the four
+   textures are the jar's own, so it draws as the jar's flat splash.
+2. **No fall-death spawn yet.** Upstream's listener places (or tops up) a stain when a mob dies from
+   **fall damage**, `bloodMBPerHP = 20` × its max health, capped at the tank. This slice is the block, its
+   tank and the click; the spawn is the next slice, and the surface it needs is there: `living_death`'s
+   `event.source` is a `HurtSource` with `damage_type` (`"minecraft:fall"`), `position` and the victim id,
+   so the rule, the placement and its differential are expressible without a new hook. The e2e sets the
+   tank with the harness command in the meantime.
+3. **No particles.** Upstream spawns blood splashes on the click, on an attack and when an entity walks
+   through; a content block has no client-side particle path in this port (same class as the chest's BER).
+4. **No hopper support.** Upstream also lets a stain rest on a hopper (`blockstate.getBlock() == HOPPER`);
+   the carpet template requires a face-sturdy block below, so a stain on a hopper cannot survive.
+5. **The bloom of rotations is the jar's blockstate**, 12 weighted variants with `y` 0/90/180/270; the pin
+   supports weighted variants, so each stain picks one at random as upstream does.
+6. **The tank is not resized and holds blood only by convention**, exactly as the two machines'
+   (gap 6 of slice 1): `block_entity_accepts_fluid` is not stamped, so another mod's pipe can push a
+   foreign fluid in; the stain then reads 0 mB and the click moves nothing until blood is written back.
+
+### Upstream defects fixed
+
+None new. (`copy_tank_data`'s applier, the shadowed leather recipe, the 25,000 mB recipe and the missing
+pickaxe tag are the earlier slices'.)
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `blood_stain` block, its item, blockstate, three models, four textures, lang, creative row | **tested** | S: placed from its own item, read back at `204,101,-10`, `0/5000 mB` |
+| the stain's 5,000 mB tank in the saved `fluids` list | **tested** | S: `/evilcraft blood` sets 3,500 and `/data get block … fluids` reads `[{Amount: 3500, Fluid: "evilcraft:blood"}]` |
+| the crouching click moves exactly the extractor's room | **tested** | S: 3,500 → 2,500 and 4,000 → 5,000, exactly 1,000 |
+| a **standing** click moves nothing (the rule) | **tested** | T: extractor 4,000, stain 3,500 unchanged |
+| a crouching click on a **vanilla** block moves nothing | **tested** | T: `minecraft:stone`, extractor 4,000 unchanged |
+| a drained stain removes its block | **tested** | U: 400 mB out, cell `minecraft:air` |
+| the jar's `minecraft:replaceable` entry | blocked(replaceable-not-expressible) | U measures it inert: a stone placed onto a stain lands above it |
+| fall-death spawning (`bloodMBPerHP = 20`) | not ported (next slice) | deviation 2: `living_death`'s `HurtSource` carries `damage_type`/`position`, so it is expressible; this slice is the block, the tank and the click |
+| click/attack/walk-through particles | not ported | deviation 3 |
+| `blood_stain` on a hopper | not ported | deviation 4 (template support rule) |
+| `/evilcraft stain`, and `/evilcraft blood` reaching the stain | **tested** | S, T, U (every readout above) |
 
 ### Skills
 

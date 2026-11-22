@@ -60,8 +60,21 @@
 #  R  the same extractor, emptied, stays empty when the zombie is killed by a *skeleton's*
 #     arrow: the arrow's `Owner` is read back as the skeleton's UUID, the zombie dies, and
 #     no player credit means no blood (the rule that excludes a mob's kill).
+#
+# Slice 5 — the Blood Stain (`BlockBloodStain`, `BlockEntityBloodStain`):
+#  S  a stain placed from its own item reads `0/5000 mB`; with its tank set to 3,500 and a
+#     carried extractor holding 4,000, a **crouching** right-click moves exactly the 1,000 mB
+#     the extractor had room for (stain 3,500 -> 2,500, extractor 4,000 -> 5,000 — one
+#     transfer, `ItemBloodExtractor.onItemUseFirst`);
+#  T  the same click **standing** moves nothing (extractor 4,000, stain 3,500), the same
+#     click crouching then does move (the crouch rule's own differential), and the same
+#     crouching click on `minecraft:stone` moves nothing (the block rule's differential);
+#  U  a stain drained to 0 removes its block (`BlockEntityBloodStain.setAmount`), and the
+#     jar's `minecraft:replaceable` entry is measured as inert at this pin (a stone placed
+#     onto a stain lands above it).
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
-# `/evilcraft held` reads 0 mB, which is the gap this slice closes. `OLD_GAME` names that
+# `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
 #
 # The operator gate on `/evilcraft info|infuser` is unit-tested
@@ -78,8 +91,9 @@
 # CONTROL=1 (the launcher exports `CONTROL_GAME`) runs the whole scenario on the same Nightly
 # **without** the package, where the chest item never registers and the run must fail.
 #
-# SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's and
-# SELFTEST=blood flips Q's (each must FAIL), proving the scenarios can fail. Phase I is the
+# SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
+# SELFTEST=blood flips Q's and SELFTEST=stain flips S's (each must FAIL), proving the
+# scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
 # in its tank drops an item that carries no payload, which is exactly what a break the listener
@@ -114,9 +128,11 @@ SX=$((X0 + 2))
 IX=$((X0 + 6))
 CHEST=evilcraft:blood_chest
 INFUSER=evilcraft:blood_infuser
+STAIN=evilcraft:blood_stain
 EXTRACTOR=evilcraft:blood_extractor
 PROMISE=evilcraft:promise_tier_3
 TANK_CAPACITY=10000
+STAIN_TANK=5000
 MB_PER_DAMAGE=5
 TICKS_PER_DAMAGE=2
 
@@ -311,6 +327,124 @@ load_slot() { # x y z slot item
     ctl wait 10 >/dev/null
 }
 
+# `/evilcraft stain X Y Z`: the line, then the parsed fields in TANK, CAPACITY and TIME.
+stain() { # stain X Y Z
+    # Wait for the reply itself: the chat is read newest first, and the readout ends in
+    # `t=<game time>`, so a new one can never equal the previous one.
+    local prev line i
+    prev=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Blood Stain \[' || true)
+    say "evilcraft stain $1 $2 $3"
+    line=$prev
+    for i in $(seq 1 40); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Blood Stain \[' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] \
+        || fail "no /evilcraft stain reply for $1 $2 $3 (last: '${line}')"
+    STAIN_LINE=$line
+    eval "$(python3 "$PORT/tools/parse_stain.py" "$STAIN_LINE")"
+    [ "${ok:-0}" = 1 ] || fail "the stain line did not parse: $STAIN_LINE"
+    echo "  $STAIN_LINE" >&2
+}
+
+# Place a stain from its own item on the arena floor below X Y Z.
+#
+# `place_chest` is the chests' helper; a stain is 1px high, and `ctl place` reports the
+# block two ticks after its click, so a click the client dropped (or the server applied a
+# tick late) reads as "the block did not change". This helper measures that instead of
+# assuming it: it re-reads after 20 ticks, and only then falls back to a plain right-click
+# on the floor below — which is the same click a player makes — printing what it saw.
+place_stain() { # x y z
+    local x=$1 y=$2 z=$3 reply name
+    ctl command "execute in minecraft:the_end run tp @s $((x - 2)).5 101 $z.5" >/dev/null
+    ctl wait 6 >/dev/null
+    # A mob standing in the cell blocks a placement ("the block did not change (blocked by an
+    # entity)"): the End spawns endermen, so clear the arena around the player first, as
+    # `arena` does at the start of the run.
+    ctl command "execute in minecraft:the_end run kill @e[type=!player,distance=..8]" >/dev/null 2>&1 || true
+    ctl wait 6 >/dev/null
+    ctl command "item replace entity @s hotbar.0 with $STAIN 1" >/dev/null
+    ctl wait 4 >/dev/null
+    ctl select 1 >/dev/null
+    ctl wait 2 >/dev/null
+    ctl look-at-block "$x" 100 "$z" up >/dev/null 2>&1 || true
+    if ! reply=$(ctl place "$x" 101 "$z" --item "$STAIN" 2>&1); then
+        echo "  ctl place did not land yet: $(tr -d '\n' <<<"$reply" | cut -c1-200)" >&2
+        ctl wait 20 >/dev/null
+        name=$(block_name "$x" 101 "$z")
+        if [ "$name" != "$STAIN" ]; then
+            echo "  after 20 ticks the cell is still '$name'" >&2
+            echo "  state: $(ctl state | jq -c '{screen, crosshair}')" >&2
+            echo "  held: $(ctl inventory | jq -c '.held')" >&2
+            echo "  floor: $(ctl block "$x" 100 "$z" | jq -c '{state}')" >&2
+            echo "  entities: $(ctl entities 6 | jq -c '[.entities[] | .type]')" >&2
+            echo "  falling back to a plain right-click on the floor below" >&2
+            ctl look-at-block "$x" 100 "$z" up >/dev/null 2>&1 || true
+            ctl wait 4 >/dev/null
+            ctl interact "$x" 100 "$z" up >/dev/null 2>&1 || true
+            ctl wait 20 >/dev/null
+        else
+            echo "  the click landed, only the two-tick report was early" >&2
+        fi
+    fi
+    name=$(block_name "$x" 101 "$z")
+    [ "$name" = "$STAIN" ] || fail "$STAIN did not place at $x,101,$z (got '$name')"
+    echo "  placed $STAIN at $x,101,$z" >&2
+}
+
+# Aim at a point inside the block's own shape, and prove the crosshair is on it.
+#
+# `ctl look-at-block` aims at a *cell's* centre, which for a one-pixel block like a stain is
+# above the shape (it stops at y+0.0625), so the ray sails over it and the aim is refused
+# ("no face of block ... is visible"). `ctl interact` re-aims the same way, so a stain is
+# clicked with a raw point aim and the mouse, exactly as a player aims at the visible splash.
+aim_at() { # x y z height expected-state
+    local x=$1 y=$2 z=$3 h=$4 want=$5 look hit
+    local cx cy cz
+    # The cell's centre is `+0.5` in every axis — not string concatenation, which puts a
+    # negative coordinate half a block off (`-10.5` is the centre of cell `-11`).
+    read -r cx cy cz <<<"$(awk -v x="$x" -v y="$y" -v z="$z" -v h="$h" \
+        'BEGIN { printf "%.4f %.4f %.4f", x + 0.5, y + h, z + 0.5 }')"
+    look=$(ctl look-at "$cx" "$cy" "$cz" 2>&1) \
+        || fail "cannot aim at $x,$y,$z (point $cx,$cy,$cz): $look"
+    local i
+    for i in $(seq 1 10); do
+        ctl wait 2 >/dev/null
+        hit=$(ctl looking-at | jq -r '.block.state // ""')
+        [ "$hit" = "$want" ] && return 0
+    done
+    fail "the crosshair is on '$hit', not on $want at $x,$y,$z (aimed at $cx,$cy,$cz)"
+}
+
+# Right-click at the current aim, the way a player's mouse does (`ctl interact` would
+# re-aim, and cannot aim at a one-pixel block).
+click_mouse() {
+    ctl mouse right click >/dev/null || fail "the right click did not run"
+    ctl wait 8 >/dev/null
+}
+
+# Crouch, right-click the block at X Y Z, and stand up again: a player's shift-click.
+crouch_click() { # x y z [height] [expected-state]
+    local x=$1 y=$2 z=$3 h=${4:-.03} want=${5:-$STAIN}
+    aim_at "$x" "$y" "$z" "$h" "$want"
+    ctl key shift down >/dev/null
+    ctl wait 2 >/dev/null
+    click_mouse
+    ctl key shift up >/dev/null
+    ctl wait 8 >/dev/null
+    echo "  crouch + right-click on $x,$y,$z (aim on $want)" >&2
+}
+
+# Right-click the block at X Y Z standing up (no crouch).
+stand_click() { # x y z [height] [expected-state]
+    local x=$1 y=$2 z=$3 h=${4:-.03} want=${5:-$STAIN}
+    aim_at "$x" "$y" "$z" "$h" "$want"
+    click_mouse
+    ctl wait 4 >/dev/null
+    echo "  right-click on $x,$y,$z (aim on $want)" >&2
+}
+
 # Take the product out of the result slot the way a player does: click it up, put it in
 # an empty inventory slot, and check the inventory gained exactly that many.
 take_output() { # item count
@@ -434,13 +568,14 @@ saved_tank() { # x y z
 
 # `/evilcraft held`, waiting for the *new* reply: the chat is read newest first, so a fixed
 # wait can read the previous readout (the infuser's readout had the same fault). Sets
-# `HELD_BLOOD`.
+# `HELD_BLOOD`. The budget is 12 s of ticks: a busy server once answered `/evilcraft held`
+# five seconds late and a 5 s budget read the previous line (measured 2026-11-22).
 held_blood() { # [what]
     local what=${1:-held} prev line i
     prev=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'Blood Extractor held' || true)
     say "evilcraft held"
     line=$prev
-    for i in $(seq 1 25); do
+    for i in $(seq 1 60); do
         ctl wait 4 >/dev/null
         line=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'Blood Extractor held' || true)
         [ -n "$line" ] && [ "$line" != "$prev" ] && break
@@ -995,4 +1130,128 @@ held_blood "skeleton-arrow"
     || fail "a skeleton's arrow filled the extractor with $HELD_BLOOD mB, so a mob's kill was credited to the player"
 echo "  the skeleton's arrow killed the zombie and the extractor stayed at $HELD_BLOOD mB"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, and a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks), places back with 6,500 mB, while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000"
+echo "== S: a crouching click with the extractor draws a stain's blood into it =="
+# The stain: the jar's own block on the arena floor, its tank set with the harness command
+# (a fall death fills one — a later slice), and an extractor with room for exactly 1,000 mB.
+# The click moves what the extractor has room for, never the whole stain.
+STX=$((X0 + 4))
+STZ=-10
+ctl command "clear @s" >/dev/null
+# A `setblock` of the same id keeps the block entity that was there, so clear first.
+ctl command "execute in minecraft:the_end run setblock $STX 101 $STZ minecraft:air" >/dev/null 2>&1 || true
+ctl wait 4 >/dev/null
+place_stain "$STX" 101 "$STZ"
+stain "$STX" 101 "$STZ"
+[ "$TANK" = 0 ] || fail "a fresh stain holds $TANK mB, expected 0"
+[ "$CAPACITY" = "$STAIN_TANK" ] || fail "the stain reports a $CAPACITY mB tank, expected $STAIN_TANK"
+say "evilcraft blood $STX 101 $STZ 3500"
+ctl wait 10 >/dev/null
+stain "$STX" 101 "$STZ"
+[ "$TANK" = 3500 ] || fail "the harness command left the stain at $TANK mB, expected 3500"
+# The tank is the pin's saved `fluids` list, the same compound the chest and the infuser
+# keep: `/data get block` reads the block entity's own data, not the readout's clamp.
+ctl command "data get block $STX 101 $STZ fluids" >/dev/null
+ctl wait 10 >/dev/null
+STAIN_SAVED=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 "has the following block data" || true)
+case "$STAIN_SAVED" in
+    "$STX, 101, $STZ has the following block data: [{Amount: 3500, Fluid: \"evilcraft:blood\"}]")
+        echo "  the stain's saved tank: $STAIN_SAVED" >&2 ;;
+    *) fail "the stain's saved data is not 3500 mB of evilcraft:blood: '$STAIN_SAVED'" ;;
+esac
+ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 9 >/dev/null
+ctl wait 2 >/dev/null
+say "evilcraft held 4000"
+ctl wait 10 >/dev/null
+held_blood "before the click"
+[ "$HELD_BLOOD" = 4000 ] || fail "the extractor holds $HELD_BLOOD mB, expected the 4,000 the command set"
+ctl command "execute in minecraft:the_end run tp @s $((STX - 2)).5 101 $((STZ)).5" >/dev/null
+ctl wait 6 >/dev/null
+crouch_click "$STX" 101 "$STZ"
+held_blood "after the crouching click"
+STAIN_HELD_AFTER=$HELD_BLOOD
+stain "$STX" 101 "$STZ"
+STAIN_MOVED=$((STAIN_HELD_AFTER - 4000))
+if [ "$SELFTEST" = stain ]; then
+    echo "(selftest=stain: asserting the crouching click drew nothing)"
+    STAIN_MOVED=0
+fi
+[ "$STAIN_MOVED" = 1000 ] \
+    || fail "the crouching click moved $STAIN_MOVED mB into the extractor, expected exactly the 1000 mB room it had"
+[ "$TANK" = 2500 ] || fail "the stain holds $TANK mB after the click, expected 3500 - 1000 = 2500"
+[ "$CAPACITY" = "$STAIN_TANK" ] || fail "the stain's tank is $CAPACITY mB, expected $STAIN_TANK"
+echo "  extractor 4000 -> $STAIN_HELD_AFTER mB, stain 3500 -> $TANK mB (moved exactly $STAIN_MOVED)"
+
+echo "== T: a standing click moves nothing; a crouching click on stone moves nothing =="
+# The same stain, the same extractor, the same click — standing: nothing moves. Then the
+# same click crouching: it moves. That pair is the crouch rule's differential.
+say "evilcraft blood $STX 101 $STZ 3500"
+ctl wait 10 >/dev/null
+say "evilcraft held 4000"
+ctl wait 10 >/dev/null
+stand_click "$STX" 101 "$STZ"
+held_blood "after the standing click"
+[ "$HELD_BLOOD" = 4000 ] || fail "a standing click moved blood into the extractor ($HELD_BLOOD mB, expected 4000)"
+stain "$STX" 101 "$STZ"
+[ "$TANK" = 3500 ] || fail "a standing click left the stain at $TANK mB, expected the untouched 3500"
+echo "  standing: extractor 4000 mB, stain 3500 mB (nothing moved)"
+crouch_click "$STX" 101 "$STZ"
+held_blood "after the same click, crouching"
+[ "$HELD_BLOOD" = 5000 ] || fail "the crouching click left the extractor at $HELD_BLOOD mB, expected a full 5000"
+stain "$STX" 101 "$STZ"
+[ "$TANK" = 2500 ] || fail "the crouching click left the stain at $TANK mB, expected 2500"
+echo "  crouching: extractor 4000 -> 5000 mB, stain 3500 -> 2500 mB (the same click, sneaking)"
+# A vanilla block answers the same crouching click with nothing: the rule is about stains.
+ctl command "execute in minecraft:the_end run setblock $STX 101 $((STZ + 2)) minecraft:stone" >/dev/null
+ctl wait 6 >/dev/null
+say "evilcraft held 4000"
+ctl wait 10 >/dev/null
+ctl command "execute in minecraft:the_end run tp @s $((STX - 2)).5 101 $((STZ + 2)).5" >/dev/null
+ctl wait 6 >/dev/null
+crouch_click "$STX" 101 $((STZ + 2)) .99 minecraft:stone
+held_blood "after the crouching click on stone"
+[ "$HELD_BLOOD" = 4000 ] \
+    || fail "a crouching click on minecraft:stone moved blood into the extractor ($HELD_BLOOD mB, expected 4000)"
+echo "  the same crouching click on $(block_name "$STX" 101 $((STZ + 2))): extractor still $HELD_BLOOD mB"
+
+echo "== U: a drained stain removes its block, and vanilla may replace it =="
+# Upstream's block entity removes its block when a committed change takes the tank to 0.
+say "evilcraft blood $STX 101 $STZ 400"
+ctl wait 10 >/dev/null
+say "evilcraft held 4600"
+ctl wait 10 >/dev/null
+stain "$STX" 101 "$STZ"
+[ "$TANK" = 400 ] || fail "the stain holds $TANK mB, expected 400"
+crouch_click "$STX" 101 "$STZ"
+held_blood "after draining the stain"
+[ "$HELD_BLOOD" = 5000 ] || fail "draining the stain left the extractor at $HELD_BLOOD mB, expected 5000"
+STAIN_GONE=$(block_name "$STX" 101 "$STZ")
+[ "$STAIN_GONE" = "minecraft:air" ] \
+    || fail "a stain drained to nothing is still $STAIN_GONE; upstream removes its block"
+echo "  a stain drained to 0 is gone ($STAIN_GONE), and the extractor took its 400 mB ($HELD_BLOOD mB)"
+# The jar also adds the stain to minecraft:replaceable, so upstream lets a block replace it.
+# This pin carries `replaceable` as a per-state block fact and offers a content block no key
+# for it (`BlockProperties` has no `replaceable`), so the tag is inert here: a stone placed
+# on a stain lands on top of it. Asserted both ways, so the day the pin reads the tag this
+# phase says so instead of passing silently (the gap is recorded in `notes.md`).
+ctl command "item replace entity @s hotbar.0 with minecraft:stone 1" >/dev/null
+ctl wait 4 >/dev/null
+place_stain "$STX" 101 $((STZ - 2))
+ctl wait 6 >/dev/null
+ctl command "item replace entity @s hotbar.0 with minecraft:stone 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+ctl command "execute in minecraft:the_end run tp @s $((STX - 2)).5 101 $((STZ - 2)).5" >/dev/null
+ctl wait 6 >/dev/null
+stand_click "$STX" 101 $((STZ - 2))
+REPLACED=$(block_name "$STX" 101 $((STZ - 2)))
+ABOVE=$(block_name "$STX" 102 $((STZ - 2)))
+[ "$REPLACED" = "$STAIN" ] \
+    || fail "a stone placed onto a stain replaced it ($REPLACED); this pin now reads minecraft:replaceable — re-read the gap in notes.md"
+[ "$ABOVE" = "minecraft:stone" ] \
+    || fail "a stone placed onto a stain left $REPLACED in the cell and $ABOVE above it, expected the stain and a stone above"
+echo "  a stone placed onto a stain landed above it ($REPLACED stays, $ABOVE above): minecraft:replaceable is inert at this pin"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, and a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin)"

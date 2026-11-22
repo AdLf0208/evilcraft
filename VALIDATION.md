@@ -221,3 +221,55 @@ Full record: `notes.md` § **Slice 4**; logs under `ports/_shared/evidence/evilc
 | selftest (this slice, Q) | `e2e-launcher-selftest-blood.log` | `FAIL` + `EXIT:1` |
 
 `check-e2e-logs.py evilcraft-e2e --strict` → `logs=6 ok=6` exit 0.
+
+## Slice 5 (0.2.5) — the Blood Stain
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 5**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`. Every step ran through `ports/tools/build-slot.sh`
+(`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`).
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` with `stain_draw` stubbed | **FAILED 4/40** — *the extractor had room for 1,000 mB / left 0 right 1000* | `sdk-test-red-slice5.log` |
+| tests (green) | `cargo test` | **40 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 494 API uses, 16 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **182,285 B** `7a1ead321c53d2a4610c2b78c84327da10b5ec3bb612bf322beef9e81e0e69bc`, `CMP-IDENTICAL`, 75 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check.log` |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | exit 0 — `0a875da  made for` | `sdk-fits.log` |
+| fits (another build) | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | exit 0 — `0b14f8a  fits` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** (40 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| artifact record | `sdk-artifact-0.2.5.txt` | bytes/sha/entries/manifest/runtime sha, check and fits lines, the packed `data/` list | `sdk-artifact-0.2.5.txt` |
+
+Launcher build: `native-0a875da-f476825c075c`, log line `Compiling evilcraft (1 of 1)`; the export's
+`src/`, `data/` and `horizon-mod.toml` are byte-identical to the port (`diff -r`/`cmp` empty, version
+`0.2.5`).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` | **`PASS` + `EXIT:0`** — A, A2, B–F, H–U | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=stain` | **`FAIL` + `EXIT:1`** at S | `e2e-launcher-selftest-stain.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=7 ok=7 missing-exit=0 bad-exit=0`
+(exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- S: a stain placed from its own item reads `0/5000 mB`; with 3,500 mB in it (and the saved compound
+  read back as `[{Amount: 3500, Fluid: "evilcraft:blood"}]`) and a 4,000 mB extractor, **one crouching
+  click** moved exactly the 1,000 mB the extractor had room for — stain 3,500 → 2,500, extractor
+  4,000 → 5,000.
+- T: the *same* click standing moved nothing (4,000 / 3,500), the same click crouching moved 1,000, and
+  the same crouching click on `minecraft:stone` moved nothing.
+- U: a stain at 400 mB drained to 0 and **its block was removed** (`minecraft:air`); the jar's
+  `minecraft:replaceable` entry is measured **inert** at this pin (a stone placed onto a stain lands
+  above it) — recorded as `blocked(replaceable-not-expressible)`.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 7/7 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.

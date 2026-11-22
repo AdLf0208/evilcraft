@@ -345,6 +345,12 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         "evilcraft infuser <pos:block_pos>",
         OPERATOR_LEVEL,
     ));
+    // The Blood Stain's readout: its five-bucket tank, for a scenario that cannot click
+    // its way to a number.
+    event.commands.push(Command::op(
+        "evilcraft stain <pos:block_pos>",
+        OPERATOR_LEVEL,
+    ));
     // `<id:id>` is a free `namespace:path` identifier: a `word` argument stops at the
     // colon (the campaign's `item`-argument trap, so no `item` kind here).
     event.commands.push(Command::op(
@@ -357,7 +363,7 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         .push(Command::op("evilcraft held <amount:integer>", 2));
 }
 
-/// `/evilcraft info|blood|damage|infuser|load|held` (`run_mod_command`).
+/// `/evilcraft info|blood|damage|infuser|stain|load|held` (`run_mod_command`).
 pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
     let source = event.source;
     let invocation = event.command;
@@ -369,11 +375,12 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
         "blood" => set_blood(host, source, invocation),
         "damage" => set_damage(host, source, invocation),
         "infuser" => crate::infuser::readout(host, source, invocation),
+        "stain" => crate::stain::readout(host, source, invocation),
         "load" => crate::infuser::load(host, source, invocation),
         "held" => held(host, source, invocation),
         _ => say(
             host,
-            "usage: /evilcraft info|blood|damage|infuser|load|held ...".to_owned(),
+            "usage: /evilcraft info|blood|damage|infuser|stain|load|held ...".to_owned(),
         ),
     }
     Flow::Cancel
@@ -430,7 +437,8 @@ fn info(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandI
 }
 
 /// `/evilcraft blood <pos> <amount>`: set a machine's tank, for a scenario that cannot
-/// wait for a kill or a fill.
+/// wait for a kill or a fill. The tank's own capacity is the clamp: 10,000 mB for the two
+/// machines, 5,000 for the Blood Stain.
 fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandInvocation) {
     let Some(pos) = block_pos(invocation) else {
         say(
@@ -446,19 +454,19 @@ fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
         );
         return;
     };
-    let Some(entity) = either_machine(host, source, pos) else {
+    let Some((entity, capacity)) = tanked(host, source, pos) else {
         return;
     };
-    let amount = amount.clamp(0, TANK_CAPACITY);
+    let amount = amount.clamp(0, capacity);
     let mut patch = Compound::new();
-    write_tank(&mut patch, amount);
+    write_tank_with(&mut patch, amount, capacity);
     // A merge, not a replacement: the saved tick counter has to survive the command.
     let changed = matches!(entity.merge_data(host, patch), Ok(true));
     if changed {
-        let _ = entity.set_data_slots(host, vec![amount, TANK_CAPACITY]);
+        let _ = entity.set_data_slots(host, vec![amount, capacity]);
         say(
             host,
-            format!("Blood machine at {pos:?}: {amount}/{TANK_CAPACITY} mB."),
+            format!("Blood tank at {pos:?}: {amount}/{capacity} mB."),
         );
     } else {
         say(host, format!("{pos:?} has no blood tank."));
@@ -620,27 +628,31 @@ pub(crate) fn our_entity(
     }
 }
 
-/// The mod machine at `pos`, chest or infuser: the two blocks share the tank command.
-fn either_machine(
+/// The mod block at `pos` that holds a blood tank — a Blood Chest, a Blood Infuser or a
+/// Blood Stain — with the capacity of its own tank, or a line saying it holds none.
+///
+/// The three share the saved `fluids` shape and the `/evilcraft blood` setter, but not
+/// their size: a stain is upstream's five-bucket splash, the two machines ten.
+fn tanked(
     host: &mut dyn ServerHost,
     source: &CommandSource,
     pos: [i32; 3],
-) -> Option<BlockEntityRef> {
+) -> Option<(BlockEntityRef, i32)> {
     let Some(level) = level_of(host, source) else {
         say(host, "evilcraft: no level is open here.".to_owned());
         return None;
     };
-    let ours = level.block(host, pos).is_some_and(|key| {
-        let id = key.id(host);
-        id == CHEST_ID || id == crate::infuser::INFUSER_ID
-    });
-    match host.block_entity(level, pos) {
-        Some(entity) if ours && entity.data(host).is_some() => Some(entity),
+    let capacity = level
+        .block(host, pos)
+        .and_then(|key| match key.id(host).as_str() {
+            CHEST_ID | crate::infuser::INFUSER_ID => Some(TANK_CAPACITY),
+            crate::runtime::STAIN => Some(crate::runtime::STAIN_TANK),
+            _ => None,
+        });
+    match (capacity, host.block_entity(level, pos)) {
+        (Some(capacity), Some(entity)) if entity.data(host).is_some() => Some((entity, capacity)),
         _ => {
-            say(
-                host,
-                format!("{pos:?} is not a Blood Chest or a Blood Infuser."),
-            );
+            say(host, format!("{pos:?} has no blood tank."));
             None
         }
     }
@@ -805,13 +817,25 @@ pub(crate) fn read_tank_raw(nbt: &Compound) -> Option<i32> {
 
 /// The blood in the entity's first tank, clamped to the capacity the machine holds.
 pub(crate) fn read_tank(nbt: &Compound) -> i32 {
-    read_tank_raw(nbt).unwrap_or(0).clamp(0, TANK_CAPACITY)
+    read_tank_with(nbt, TANK_CAPACITY)
+}
+
+/// The blood in the entity's first tank, clamped to `capacity`: the two machines hold ten
+/// buckets, the Blood Stain five.
+pub(crate) fn read_tank_with(nbt: &Compound, capacity: i32) -> i32 {
+    read_tank_raw(nbt).unwrap_or(0).clamp(0, capacity)
 }
 
 /// Write the first tank back in the pin's `fluids` shape, an empty tank as
 /// `minecraft:empty` so the tank's index stays in place.
 pub(crate) fn write_tank(nbt: &mut Compound, amount: i32) {
-    let amount = amount.clamp(0, TANK_CAPACITY);
+    write_tank_with(nbt, amount, TANK_CAPACITY);
+}
+
+/// Write the first tank back in the pin's `fluids` shape, clamped to `capacity`, an empty
+/// tank as `minecraft:empty` so the tank's index stays in place.
+pub(crate) fn write_tank_with(nbt: &mut Compound, amount: i32, capacity: i32) {
+    let amount = amount.clamp(0, capacity);
     let mut entry = Compound::new();
     entry.insert(
         "Fluid".into(),

@@ -152,6 +152,10 @@ pub const SLOT_COUNT: usize = CHEST_SLOTS + 1;
 pub const CHEST: &str = "evilcraft:blood_chest";
 /// The item this port carries.
 pub const EXTRACTOR: &str = "evilcraft:blood_extractor";
+/// The Blood Stain: the splash a mob's fall leaves, and an extractor's source.
+pub const STAIN: &str = "evilcraft:blood_stain";
+/// Upstream `BlockEntityBloodStain.CAPACITY`: five buckets of blood.
+pub const STAIN_TANK: i32 = 5 * BUCKET;
 /// The tank's fluid id. Horizon has no blood block or bucket, so this is a tank id.
 pub const BLOOD: &str = "evilcraft:blood";
 
@@ -285,6 +289,48 @@ pub fn fill_extractor(held: i32, pool: i32) -> (i32, i32) {
     let room = (EXTRACTOR_CAPACITY - held).max(0);
     let moved = pool.clamp(0, room);
     (held + moved, pool - moved)
+}
+
+/// One crouching click with a Blood Extractor on a Blood Stain, as upstream's
+/// `ItemBloodExtractor.onItemUseFirst` performs it: the click moves the stain's blood
+/// into the extractor itself, so nothing reads or writes a block on the way.
+///
+/// The stain keeps what the extractor has no room for, and the extractor takes no more
+/// than the stain holds (`move(source, .., Integer.MAX_VALUE, ..)` bounded by the item's
+/// tank): the click is one transfer, never a spill.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StainDraw {
+    /// What the stain keeps.
+    pub stain: i32,
+    /// What the extractor holds afterwards.
+    pub extractor: i32,
+    /// How much moved from the stain into the extractor.
+    pub moved: i32,
+}
+
+impl StainDraw {
+    /// Whether the click emptied the stain: upstream's block entity removes its block as
+    /// soon as a committed change leaves the tank at 0 (`BlockEntityBloodStain.setAmount`).
+    #[must_use]
+    pub fn drains_the_stain(self) -> bool {
+        self.moved > 0 && self.stain == 0
+    }
+}
+
+/// The blood a crouching click moves from a stain into an extractor: as much as the
+/// extractor has room for, never more than the stain holds. A stain never holds more
+/// than its own 5-bucket tank, whatever a `/give`d payload or a config says.
+#[must_use]
+pub fn stain_draw(stain: i32, extractor: i32) -> StainDraw {
+    let stain = stain.clamp(0, STAIN_TANK);
+    let extractor = extractor.clamp(0, EXTRACTOR_CAPACITY);
+    let room = (EXTRACTOR_CAPACITY - extractor).max(0);
+    let moved = stain.min(room);
+    StainDraw {
+        stain: stain - moved,
+        extractor: extractor + moved,
+        moved,
+    }
 }
 
 #[cfg(test)]
@@ -458,6 +504,47 @@ mod tests {
     fn the_environment_and_kill_command_fill_nothing() {
         // A fall, lava, the void, `/kill`: the source names no causing entity.
         assert!(!Credit::Nobody.fills());
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 5: the Blood Stain, and the extractor's crouching click
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_crouching_click_moves_only_the_room_the_extractor_has() {
+        let draw = stain_draw(3_500, 4_000);
+        assert_eq!(draw.moved, 1_000, "the extractor had room for 1,000 mB");
+        assert_eq!(draw.stain, 2_500, "the stain keeps the rest");
+        assert_eq!(draw.extractor, EXTRACTOR_CAPACITY);
+        assert!(!draw.drains_the_stain());
+    }
+
+    #[test]
+    fn a_stain_with_less_than_the_room_empties_into_the_extractor() {
+        let draw = stain_draw(1_000, 0);
+        assert_eq!((draw.moved, draw.stain, draw.extractor), (1_000, 0, 1_000));
+        assert!(draw.drains_the_stain(), "an emptied stain is removed");
+    }
+
+    #[test]
+    fn a_full_extractor_takes_nothing_and_leaves_the_stain_alone() {
+        let draw = stain_draw(3_500, EXTRACTOR_CAPACITY);
+        assert_eq!(draw.moved, 0);
+        assert_eq!(draw.stain, 3_500);
+        assert_eq!(draw.extractor, EXTRACTOR_CAPACITY);
+        assert!(!draw.drains_the_stain());
+    }
+
+    #[test]
+    fn a_stain_never_holds_more_than_five_buckets() {
+        assert_eq!(STAIN_TANK, 5 * BUCKET);
+        assert_eq!(STAIN, "evilcraft:blood_stain");
+        let draw = stain_draw(9_000, 0);
+        assert_eq!(
+            (draw.moved, draw.stain, draw.extractor),
+            (STAIN_TANK, 0, STAIN_TANK),
+            "a doctored stain gives at most its own tank"
+        );
     }
 
     // -----------------------------------------------------------------------
