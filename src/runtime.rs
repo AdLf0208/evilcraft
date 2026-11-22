@@ -333,6 +333,85 @@ pub fn stain_draw(stain: i32, extractor: i32) -> StainDraw {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Slice 6: a fall death leaves a Blood Stain (`BlockBloodStain.bloodStainedBlockEvent`)
+// ---------------------------------------------------------------------------
+
+/// Upstream `BlockBloodStainConfig.bloodMBPerHP`: 20 mB of blood for each point of max health.
+pub const BLOOD_MB_PER_HP: i32 = 20;
+
+/// Where a fall death's blood goes and what the cell holds afterwards.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FallStain {
+    /// The cell the blood belongs to: the stain below the mob, or the mob's own cell.
+    pub cell: [i32; 3],
+    /// Whether that cell needs a fresh stain first (it was empty).
+    pub place: bool,
+    /// The tank afterwards, never above [`STAIN_TANK`].
+    pub tank: i32,
+}
+
+/// What the mob's own cell holds — the cell its feet are in, which is where a stain that
+/// killed it before stands (upstream's `get(pos, BlockEntityBloodStain.class)`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cell {
+    /// Empty, and standing on a floor a stain can rest on (upstream's `isEmptyBlock` +
+    /// `canSurvive`): a fresh stain goes here.
+    Free,
+    /// Already a stain, holding this much blood: this death tops it up.
+    Stain(i32),
+    /// Anything else: no stain can be placed and there is none to top up.
+    Taken,
+}
+
+/// The blood a mob's fall leaves: `bloodMBPerHP x max health`, clamped to the stain's tank.
+///
+/// Upstream truncates the float product to an `int` and the block entity's `addAmount`
+/// clamps the sum to `CAPACITY`; a mob with no health leaves nothing.
+#[must_use]
+pub fn stain_blood(max_health: f32) -> i32 {
+    let amount = f64::from(max_health) * f64::from(BLOOD_MB_PER_HP);
+    (amount as i32).clamp(0, STAIN_TANK)
+}
+
+/// Which cell a fall death stains, and what it holds afterwards.
+///
+/// Upstream's `bloodStainedBlockEvent` reads the block **below** the dying mob first: when it
+/// is already a stain the blood goes to that cell. Otherwise it moves to the mob's own cell:
+/// a stain already standing there (the mob died on top of it) is topped up, an empty cell
+/// gets a fresh stain, and anything else is left alone. `below` is the tank of the stain
+/// below, when there is one.
+#[must_use]
+pub fn fall_stain(
+    victim: [i32; 3],
+    max_health: f32,
+    below: Option<i32>,
+    own: Cell,
+) -> Option<FallStain> {
+    let blood = stain_blood(max_health);
+    if blood == 0 {
+        return None;
+    }
+    let topped_up = |existing: i32| (existing.clamp(0, STAIN_TANK) + blood).clamp(0, STAIN_TANK);
+    if let Some(existing) = below {
+        return Some(FallStain {
+            cell: [victim[0], victim[1] - 1, victim[2]],
+            place: false,
+            tank: topped_up(existing),
+        });
+    }
+    let tank = match own {
+        Cell::Stain(existing) => topped_up(existing),
+        Cell::Free => topped_up(0),
+        Cell::Taken => return None,
+    };
+    Some(FallStain {
+        cell: victim,
+        place: own == Cell::Free,
+        tank,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,6 +624,83 @@ mod tests {
             (STAIN_TANK, 0, STAIN_TANK),
             "a doctored stain gives at most its own tank"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 6: a fall death leaves a Blood Stain
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_twenty_hp_zombies_fall_leaves_four_hundred_mb_in_its_own_cell() {
+        // Upstream's `bloodMBPerHP = 20` times the mob's max health, in the cell it died in:
+        // a stain rests *on* the floor, so the blood is the mob's own block position.
+        assert_eq!(stain_blood(20.0), 400);
+        assert_eq!(stain_blood(10.0), 200);
+        assert_eq!(
+            fall_stain([10, 101, 20], 20.0, None, Cell::Free),
+            Some(FallStain {
+                cell: [10, 101, 20],
+                place: true,
+                tank: 400,
+            })
+        );
+    }
+
+    #[test]
+    fn a_second_fall_tops_the_stain_it_lands_on_up_instead_of_placing_another() {
+        // The mob's own cell already holds the first death's stain (`Cell::Stain`): the
+        // second death adds to it in place, and no block is placed.
+        assert_eq!(
+            fall_stain([10, 101, 20], 20.0, None, Cell::Stain(400)),
+            Some(FallStain {
+                cell: [10, 101, 20],
+                place: false,
+                tank: 800,
+            })
+        );
+    }
+
+    #[test]
+    fn a_fall_one_cell_above_a_stain_tops_that_stain_up() {
+        // Upstream reads the block *below* the mob first; a stain there takes the blood.
+        assert_eq!(
+            fall_stain([10, 101, 20], 20.0, Some(400), Cell::Free),
+            Some(FallStain {
+                cell: [10, 100, 20],
+                place: false,
+                tank: 800,
+            })
+        );
+        // The mob's own cell does not matter when the stain below takes it.
+        assert_eq!(
+            fall_stain([10, 101, 20], 20.0, Some(400), Cell::Taken).map(|landing| landing.tank),
+            Some(800)
+        );
+    }
+
+    #[test]
+    fn a_fall_never_fills_a_stain_past_its_five_buckets() {
+        // Eight buckets of blood from one death, and a stain that already holds 4,800 mB.
+        assert_eq!(
+            stain_blood(400.0),
+            STAIN_TANK,
+            "an 8,000 mB fall fits 5,000"
+        );
+        assert_eq!(
+            fall_stain([10, 101, 20], 20.0, None, Cell::Stain(4_800)).map(|landing| landing.tank),
+            Some(STAIN_TANK)
+        );
+    }
+
+    #[test]
+    fn a_fall_with_no_cell_to_stain_leaves_the_level_alone() {
+        // No stain below, and the mob's own cell holds neither air nor a stain: nothing is
+        // written (a mob that dies inside a block leaves no stain).
+        assert_eq!(fall_stain([10, 101, 20], 20.0, None, Cell::Taken), None);
+        // A death with no health to give is not blood either.
+        assert_eq!(stain_blood(0.0), 0);
+        assert_eq!(stain_blood(-5.0), 0);
+        assert_eq!(fall_stain([10, 101, 20], 0.0, None, Cell::Free), None);
     }
 
     // -----------------------------------------------------------------------

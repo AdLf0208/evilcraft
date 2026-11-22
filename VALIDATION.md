@@ -273,3 +273,55 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 7/7 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 6 (0.2.6) — a fall death leaves a Blood Stain (`BlockBloodStain.bloodStainedBlockEvent`)
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 6**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`. Every step ran through `ports/tools/build-slot.sh`
+(`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`).
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` with `stain_blood`/`fall_stain` stubbed | **FAILED 4/45** — *left: 0 right: 400*, *left: None right: Some(FallStain { cell: [10, 100, 20], place: false, tank: 800 })* | `sdk-test-red-slice6.log` |
+| tests (green) | `cargo test` | **45 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 510 API uses, 16 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **185,614 B** `b99d911e…1872c`, `CMP-IDENTICAL`, 75 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check.log` |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | exit 0 — `0a875da  made for` | `sdk-fits.log` |
+| fits (another build) | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | exit 0 — `0b14f8a  fits` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** (45 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | unchanged: slice 1's one unverified `"rolls": 1.0`; no new data file | job report |
+| artifact record | `sdk-artifact-0.2.6.txt` | bytes/sha/entries/manifest/runtime+stain sha, check and fits lines, the packed `data/` list | `sdk-artifact-0.2.6.txt` |
+
+Launcher build: `native-0a875da-0d2d381f7c4f`, log line `Compiling evilcraft (1 of 1)`; the export's
+`src/`, `data/` and `horizon-mod.toml` are byte-identical to the port (`diff -r`/`cmp` empty, version
+`0.2.6`). A first diagnostic build was deleted rather than exported (`notes.md` § Slice 6, harness fact 5).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** — A, A2, B–F, H–W | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=fall` | **`FAIL` + `EXIT:1`** at V — *a 20 HP zombie's fall left a stain holding 0 mB, expected 20 x 20 = 400* | `e2e-launcher-selftest-fall.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=8 ok=8 missing-exit=0 bad-exit=0`
+(exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- V: a 20 HP zombie dropped six cells down a three-cell-wide stone chimney with `{Health:1.0f}` dies of
+  the fall, and the cell it died in (`204,101,-6`) becomes `evilcraft:blood_stain` holding
+  **400 mB** (= 20 × 20) — in `/evilcraft stain` (`tank 400/5000 mB`) and in the block entity's own
+  saved `fluids` (`data get block … fluids` → `400`).
+- X: a second fall death on the same cell leaves **800 mB** in the *same* block and the cell above it
+  `minecraft:air` — a top-up, not a second stain.
+- W: the same cell and the same zombie killed with a diamond sword stay `minecraft:air` — the death's
+  differential: only a fall death stains.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 8/8 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.

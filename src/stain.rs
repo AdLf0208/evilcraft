@@ -14,12 +14,13 @@
 //! click writes the compound as well.
 
 use mod_api::{
-    self, BlockEntityEvent, BlockEntityPart, BlockEntityRef, BlockPart, CommandInvocation,
-    CommandSource, Compound, Hand, Host, HostSide, InteractionResult, ItemPart, LevelSide,
-    ModFluidTanks, PlayerRef, ServerHost, UseOnEvent,
+    self, BlockEntityEvent, BlockEntityPart, BlockEntityRef, BlockFace, BlockPart,
+    BlockUpdateFlags, CommandInvocation, CommandSource, Compound, Hand, Host, HostSide,
+    InteractionResult, ItemPart, LevelRef, LevelSide, LivingDeathEvent, ModFluidTanks, PlayerRef,
+    ServerHost, SupportType, UseOnEvent,
 };
 
-use crate::runtime::{STAIN, STAIN_TANK, stain_draw};
+use crate::runtime::{Cell, STAIN, STAIN_TANK, fall_stain, stain_draw};
 
 /// The block entity type: a bare name, so the mod's namespace qualifies it.
 pub const STAIN_ENTITY: &str = "blood_stain";
@@ -28,6 +29,102 @@ pub const STAIN_BLOCK: &str = "blood_stain";
 /// Vanilla's inventory slot of the off hand: the slot number
 /// `PlayerRef::set_inventory_slot` takes for a click made with it.
 const OFF_HAND_SLOT: u32 = 40;
+/// Vanilla's fall damage type: the one death upstream turns into a stain
+/// (`event.getSource() == event.getEntity().damageSources().fall()`).
+const FALL: &str = "minecraft:fall";
+/// What an empty cell may hold: vanilla's `isEmptyBlock` is `BlockState.isAir`.
+const AIR: &[&str] = &["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
+
+// ---------------------------------------------------------------------------
+// A fall death leaves a stain
+// ---------------------------------------------------------------------------
+
+/// A living thing died (`Hooks::living_death`): a death from **fall damage** leaves its blood
+/// on the floor, `bloodMBPerHP` (20) mB for each point of its max health, in the stain it
+/// stands on or a fresh one in its own cell (upstream's
+/// `BlockBloodStain.bloodStainedBlockEvent`). Returns whether a tank was written.
+///
+/// Upstream defers this to the next tick because Forge's fall logic caches the block it stood
+/// on; at this pin the death is the engine's own event and the write lands where the mob died,
+/// so the blood is placed at the death (the e2e measures it).
+pub fn on_death(host: &mut dyn ServerHost, event: &LivingDeathEvent<'_>) -> bool {
+    if event.source.damage_type != FALL {
+        return false;
+    }
+    // The dying entity is still in the level here (`living_death` runs before the removal),
+    // so its own block position is the cell upstream reads.
+    let Some(victim) = host.entity(event.entity) else {
+        return false;
+    };
+    let Some(cell) = victim.block_position(&*host) else {
+        return false;
+    };
+    let Some(level) = victim.level(&*host) else {
+        return false;
+    };
+    let Some(health) = crate::blood::max_health(&*host, event.entity) else {
+        return false;
+    };
+    let below = [cell[0], cell[1] - 1, cell[2]];
+    let below_tank = if level
+        .block(&*host, below)
+        .is_some_and(|key| key.id(&*host) == STAIN)
+    {
+        stain_tank(host, level, below)
+    } else {
+        None
+    };
+    let own = if level
+        .block(&*host, cell)
+        .is_some_and(|key| key.id(&*host) == STAIN)
+    {
+        // The mob died on top of a stain it made before: this death tops that one up.
+        stain_tank(host, level, cell).map_or(Cell::Taken, Cell::Stain)
+    } else if room_for_stain(&*host, level, cell, below) {
+        Cell::Free
+    } else {
+        Cell::Taken
+    };
+    let Some(landing) = fall_stain(cell, health, below_tank, own) else {
+        return false;
+    };
+    if landing.place {
+        let Some(state) = host.block_state_id(STAIN) else {
+            return false;
+        };
+        let flags = BlockUpdateFlags::NEIGHBORS | BlockUpdateFlags::CLIENTS;
+        if !matches!(level.set_block(host, landing.cell, state, flags), Ok(true)) {
+            return false;
+        }
+    }
+    let Some(entity) = host.block_entity(level, landing.cell) else {
+        return false;
+    };
+    let mut patch = Compound::new();
+    crate::blood::write_tank_with(&mut patch, landing.tank, STAIN_TANK);
+    matches!(entity.merge_data(host, patch), Ok(true))
+}
+
+/// Whether `cell` can take a fresh stain: nothing stands in it, and the block below gives a
+/// face a stain rests on (upstream's `isEmptyBlock` + `canSurvive`; the template is vanilla's
+/// carpet, whose `canSurvive` is `canSupportCenter(.., Direction.UP)`).
+fn room_for_stain(host: &dyn Host, level: LevelRef, cell: [i32; 3], below: [i32; 3]) -> bool {
+    let empty = level
+        .block(host, cell)
+        .is_some_and(|key| AIR.contains(&key.id(host).as_str()));
+    empty
+        && level
+            .block_face_sturdy(host, below, BlockFace::Up, SupportType::Center)
+            .unwrap_or(false)
+}
+
+/// The blood the stain at `pos` holds, or nothing when its block entity is gone (upstream's
+/// `get(pos, BlockEntityBloodStain.class).ifPresent` writes nothing then either).
+fn stain_tank(host: &mut dyn ServerHost, level: LevelRef, pos: [i32; 3]) -> Option<i32> {
+    let entity = host.block_entity(level, pos)?;
+    let data = entity.data(&*host)?;
+    Some(crate::blood::read_tank_with(&data, STAIN_TANK))
+}
 
 // ---------------------------------------------------------------------------
 // The block entity

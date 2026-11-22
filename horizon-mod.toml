@@ -1,8 +1,9 @@
 id = "evilcraft"
 name = "EvilCraft"
-version = "0.2.5"
+version = "0.2.6"
 description = """A port of EvilCraft's blood economy for Horizon: the Blood Extractor fills with
-the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), a crouching
+the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), a mob that dies from
+fall damage leaves a Blood Stain holding 20 mB for each point of its max health, a crouching
 right-click drains a Blood Stain's five buckets into it, the Blood Infuser spends that blood
 infusing an item into another (a bone into a blaze rod, sand into soul sand, and the mod's own
 recipes as data), and the Blood Chest spends it to repair the ten damaged items in its slots,

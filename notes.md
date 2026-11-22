@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -1197,7 +1197,8 @@ leaves every id unknown, so S cannot even place the stain.
    textures are the jar's own, so it draws as the jar's flat splash.
 2. **No fall-death spawn yet.** Upstream's listener places (or tops up) a stain when a mob dies from
    **fall damage**, `bloodMBPerHP = 20` × its max health, capped at the tank. This slice is the block, its
-   tank and the click; the spawn is the next slice, and the surface it needs is there: `living_death`'s
+   tank and the click; the spawn is the next slice — **closed by slice 6, below** — and the surface it
+   needs is there: `living_death`'s
    `event.source` is a `HurtSource` with `damage_type` (`"minecraft:fall"`), `position` and the victim id,
    so the rule, the placement and its differential are expressible without a new hook. The e2e sets the
    tank with the harness command in the meantime.
@@ -1227,10 +1228,231 @@ pickaxe tag are the earlier slices'.)
 | a crouching click on a **vanilla** block moves nothing | **tested** | T: `minecraft:stone`, extractor 4,000 unchanged |
 | a drained stain removes its block | **tested** | U: 400 mB out, cell `minecraft:air` |
 | the jar's `minecraft:replaceable` entry | blocked(replaceable-not-expressible) | U measures it inert: a stone placed onto a stain lands above it |
-| fall-death spawning (`bloodMBPerHP = 20`) | not ported (next slice) | deviation 2: `living_death`'s `HurtSource` carries `damage_type`/`position`, so it is expressible; this slice is the block, the tank and the click |
+| fall-death spawning (`bloodMBPerHP = 20`) | **tested** | slice 6: V (a 20 HP zombie's fall → `400/5000`), X (a second fall → `800/5000`, no second block), W (a sword kill leaves the cell air) |
 | click/attack/walk-through particles | not ported | deviation 3 |
 | `blood_stain` on a hopper | not ported | deviation 4 (template support rule) |
 | `/evilcraft stain`, and `/evilcraft blood` reaching the stain | **tested** | S, T, U (every readout above) |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 6 — a fall death leaves a Blood Stain (`BlockBloodStain.bloodStainedBlockEvent`) (2026-11-22)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.6**.
+The registry entry, the PR and the ledger stay the orchestrator's.
+
+### The gap this slice closes, and why this family
+
+Slice 5's deviation 2, and its coverage row, named it exactly:
+
+> **No fall-death spawn yet.** Upstream's listener places (or tops up) a stain when a mob dies from
+> **fall damage**, `bloodMBPerHP = 20` × its max health, capped at the tank.
+
+It is the source end of the stain slice 5 already ships (the block, its five-bucket tank and the
+extractor's crouching click), it is self-contained, and the assertion is one number a scenario can
+read: `/evilcraft stain <pos>`.
+
+**Tier:** `deep` still governs the port; this slice is a `logic` family inside it — one listener on the
+death moment the port already hears (`living_death`, slice 4), a level write and a tank merge. No new
+block, machine, entity or renderer.
+
+### Upstream source read (analysis only, not copied)
+
+<https://github.com/CyclopsMC/EvilCraft>, `master` checkout at `ports/_shared/upstream/evilcraft`
+(commit `aa81220`, read 2026-11-22):
+
+- `block/BlockBloodStain.java` — `bloodStainedBlockEvent(LivingDeathEvent)`, the whole rule;
+- `block/BlockBloodStainConfig.java` — `bloodMBPerHP = 20`, `spawnBlacklist = ["tconstruct:.*"]`,
+  `spawnOnBlockEntities = false`, `noCollission()`, `strength(0.5F)`;
+- `blockentity/BlockEntityBloodStain.java` — `CAPACITY = 5000`, `addAmount` clamps to it and removes
+  the block at 0.
+
+The rule as the file states it: when the death's source **is** the level's fall damage source (and the
+mob is not a vengeance spirit), take `floor(entity x/y/z)`, read the block at `y-1`; if that is a stain
+add to *it*, otherwise move to the mob's own cell and place a stain there when it is empty and can
+survive; then add `20 × maxHealth` mB to the block entity at that cell. Upstream defers the write one
+tick (`event.getEntity().getServer().execute(..)`) because Forge's fall handler caches the block it
+landed on.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Listener | `stain::on_death` from `Hooks::living_death`: only `event.source.damage_type == "minecraft:fall"`; the victim's own `EntityRef::block_position`, its max health through the same `blood::max_health` the extractor fill uses | `BlockBloodStain.bloodStainedBlockEvent` |
+| Rule | `runtime::stain_blood` (`20 × hp`, capped at the tank), `runtime::fall_stain(victim, hp, below, own)` with `Cell::{Free, Stain(tank), Taken}` and `FallStain { cell, place, tank }` | the same file's order: below first, then the mob's own cell |
+| Placement | `LevelRef::set_block` with the stain's own default state (`host.block_state_id(STAIN)`, `NEIGHBORS \| CLIENTS`), then the tank merged into the new block entity's saved `fluids` | `setBlockAndUpdate(pos, defaultBlockState())` + `addAmount` |
+| Support | `room_for_stain`: the cell is `minecraft:air`/`cave_air`/`void_air` **and** `block_face_sturdy(below, Up, Center)` — the carpet template's own `canSurvive` | `isEmptyBlock` + `canSurvive` |
+
+Nothing else changed: the extractor fill, the tank's serialisation, the click and the commands are the
+earlier slices'. `/evilcraft stain` (slice 5) is the readout this slice's assertions use.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice6.log` (the five tests written, `stain_blood`/`fall_stain` stubbed to `0`/`None`):
+
+```
+test result: FAILED. 41 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_fall_never_fills_a_stain_past_its_five_buckets stdout ----
+thread 'runtime::tests::a_fall_never_fills_a_stain_past_its_five_buckets' (196483) panicked at src/runtime.rs:690:9:
+assertion `left == right` failed: an 8,000 mB fall fits 5,000
+  left: 0
+ right: 5000
+
+---- runtime::tests::a_fall_one_cell_above_a_stain_tops_that_stain_up stdout ----
+thread 'runtime::tests::a_fall_one_cell_above_a_stain_tops_that_stain_up' (196484) panicked at src/runtime.rs:672:9:
+assertion `left == right` failed
+  left: None
+ right: Some(FallStain { cell: [10, 100, 20], place: false, tank: 800 })
+
+---- runtime::tests::a_second_fall_tops_the_stain_it_lands_on_up_instead_of_placing_another stdout ----
+thread 'runtime::tests::a_second_fall_tops_the_stain_it_lands_on_up_instead_of_placing_another' (196493) panicked at src/runtime.rs:659:9:
+assertion `left == right` failed
+  left: None
+ right: Some(FallStain { cell: [10, 101, 20], place: false, tank: 800 })
+
+---- runtime::tests::a_twenty_hp_zombies_fall_leaves_four_hundred_mb_in_its_own_cell stdout ----
+thread 'runtime::tests::a_twenty_hp_zombies_fall_leaves_four_hundred_mb_in_its_own_cell' (196502) panicked at src/runtime.rs:643:9:
+assertion `left == right` failed
+  left: 0
+ right: 400
+```
+
+The fifth test (`a_fall_with_no_cell_to_stain_leaves_the_level_alone`: `Cell::Taken` → `None`, zero and
+negative health → no blood) passes against the stub by construction — it is the boundary a *wrong*
+implementation would break, not one the stub breaks.
+
+**A red run before it changed the rule.** The first draft of `fall_stain` only knew "the cell below is a
+stain" and "the cell below is not", so a second death on the same spot would have found the mob's own
+cell *occupied* and written nothing — the counterfactual's 800 mB would have failed in game. Re-reading
+`BlockBloodStain.java` showed the second death tops up the block entity **in the mob's own cell** (the
+mob stands on the stain), and the rule gained the `Cell::Stain` case; the red log above is the run
+against that corrected rule, not the first draft.
+
+Green: `sdk-test.log` — **45 passed, 0 failed**; `sdk-clippy.log` — `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 4/45** (`EXIT:101`) | `sdk-test-red-slice6.log` |
+| tests (green) | `cargo test` | **45 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 510 API uses, 16 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **185,614 B**, sha256 `b99d911e…1872c`, `CMP-IDENTICAL`, 75 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | unchanged: slice 1's one `"rolls": 1.0`; no new data file this slice | job report |
+| artifact record | `sdk-artifact-0.2.6.txt` | bytes/sha/entries/manifest/runtime+stain sha, check and fits lines, the packed `data/` list | `sdk-artifact-0.2.6.txt` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-0d2d381f7c4f`, with the log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/` and `horizon-mod.toml` are byte-identical
+to the port (`diff -r`/`cmp` empty, `version = "0.2.6"`), so the game ran the sources this package is
+built from.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** (A, A2, B–F, H–W) | `e2e-launcher.log` |
+| control (no package at all) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C (*the pickaxe was not repaired … damage 217*) | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=fall` | **`FAIL` + `EXIT:1`** at V (*the fall left a stain holding 0 mB, expected 20 x 20 = 400*) | `e2e-launcher-selftest-fall.log` |
+| selftest (slices 2–5, history) | `SELFTEST=infuser|tank|blood|stain` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=8 ok=8 missing-exit=0
+bad-exit=0` (exit 0).
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== V: a mob's fall death leaves a Blood Stain holding its blood ==
+  Blood Stain [204, 101, -6]: tank 400/5000 mB, t=9625
+  204, 101, -6 has the following block data: 400
+  the 20 HP zombie died of its fall and left evilcraft:blood_stain at 204,101,-6 holding 400 mB
+== X: a second fall death on the same cell tops the stain up to 800 mB ==
+  Blood Stain [204, 101, -6]: tank 800/5000 mB, t=9682
+  204, 101, -6 has the following block data: 800
+  a second fall death on the same cell: 400 -> 800 mB in one stain, no second block
+== W: the same mob killed with a sword leaves the cell empty (the death's differential) ==
+  the same cell after a sword kill is minecraft:air (no stain)
+```
+
+**Fail-capable, four ways.** (1) `SELFTEST=fall` inverts V's own assertion and exits 1. (2) X is the
+counterfactual: the same cell, the same mob, a second fall — 400 → 800 in the *same* block, and the cell
+above stays air, so a "second stain instead of a top-up" would fail. (3) W is the death's differential:
+the same cell and the same zombie killed with a diamond sword leave `minecraft:air`, so the blood in V
+and X can only come from the fall's damage type. (4) The whole-package control leaves every id unknown,
+so V cannot even place a stain.
+
+### The probe that found the two harness traps (kept as `probe-fall.sh`, not a verdict)
+
+The first full run failed at V with *a fall death left 'minecraft:air'*. A diagnostic build (chat lines
+from each step of `on_death`) and a throwaway probe showed the mod was never reached because the zombie
+was not dying of a fall at all: summoned into a **one-cell** stone shaft, it died with
+`type="minecraft:in_wall"` before it fell. With the shaft three cells wide the same run printed
+`death type="minecraft:fall"`, `cell=[204, 101, -6]`, `health=20`, `own=Free`, `set_block … -> Ok(true)`,
+`merge Ok(true) tank=400`, and a second drop `own=Stain(400) -> tank=800`. The diagnostics were removed
+before the package was rebuilt; the probe stays as `ports/_shared/evidence/evilcraft-e2e/probe-fall.sh`
+(its own `EXIT:0` is a probe, not this slice's evidence).
+
+### Harness facts learned here (record these before the next fall/placement slice pays for them again)
+
+1. **A mob summoned into a one-cell shaft dies of `minecraft:in_wall`, not of the fall.** Three cells of
+   air inside the shaft is enough; the stone shell can be five cells wide.
+2. **`HurtSource.position` is `None` for a fall death** (measured: `type="minecraft:fall" causing=0
+   direct=0 pos=None`). The victim's own `EntityRef::block_position` is the cell upstream reads, and it
+   is exact at `living_death` (the mob is still in the level).
+3. **`"$z.5"` for `z=-6` is `-6.5`, the centre of cell -7** — the same half-cell trap slice 5 paid for.
+   The summon point is computed with `awk` (`x + 0.5`), and the run asserts the cell the blood landed in.
+4. **A 1 HP zombie still has 20 max health**, so `{Health:1.0f}` makes a six-block drop lethal while the
+   stain's 400 mB proves the *max* health is the field upstream multiplies (a current-health reading
+   would give 20).
+5. **The launcher's `native-build` is content-addressed and says *Up to date (no build needed)* when the
+   sources match an existing build** — and `launcher-game.sh`'s `built_tag` fallback then picks the
+   **newest** tag with a byte-identical *manifest*, which can be a different (stale) build of the same
+   version. Always `diff -r` the export against the port after a build (this run caught a diagnostic
+   build being exported that way) and delete the stale tag rather than trusting the printed tag.
+6. **`/evilcraft stain` reads the block entity's clamp, `/data get block … fluids` reads the saved
+   compound** — both were asserted (400 and 800 in each), so a readout that disagreed with the save
+   would fail.
+
+### Deviations this slice adds
+
+1. **The stain is placed at the death, not one tick later.** Upstream defers the write because Forge's
+   fall handler caches the landed block; at this pin `living_death` is the engine's own event and the
+   write lands where the mob died (measured in V/X). The rule and the numbers are unchanged.
+2. **`canSurvive` is the carpet template's rule**: the cell must be air and the block below a sturdy
+   face. Upstream additionally refuses a block below that has a block entity (`spawnOnBlockEntities =
+   false`) and accepts a hopper (`blockstate.getBlock() == HOPPER`); slice 5's deviation 4 already
+   records that a stain on a hopper cannot survive here, and the block-entity case is accepted by the
+   pin's rule where upstream refuses it.
+3. **The `tconstruct:.*` spawn blacklist is not carried**: Tinkers' Construct is not in this port's
+   carried set, so no block the port ships can match it.
+4. **The vengeance-spirit exclusion is not modelled**: `EntityVengeanceSpirit` is not carried.
+5. **Max health is read at the death** (the mob is still alive at `living_death`), through the same
+   helper the extractor fill uses — no stored "last health", no extra hook.
+
+### Upstream defects fixed
+
+None new. (`copy_tank_data`'s applier, the shadowed leather recipe, the 25,000 mB recipe and the missing
+pickaxe tag are the earlier slices'.)
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| a mob's **fall death** leaves a stain, `bloodMBPerHP = 20` × max health | **tested** | V: a 20 HP zombie's fall → `evilcraft:blood_stain` at `204,101,-6`, `400/5000` mB in the readout **and** in the saved `fluids` |
+| a second fall on the same cell **tops the stain up** | **tested** | X: `400 → 800` in the same block, `minecraft:air` above it (no second stain) |
+| a death that is **not** a fall leaves no stain | **tested** | W: the same zombie killed with a diamond sword leaves the cell `minecraft:air` |
+| the tank's 5,000 mB cap | **tested (unit + in game)** | `a_fall_never_fills_a_stain_past_its_five_buckets`; every in-game read is against `5000` |
+| a fall with no cell to stain | **tested (unit)** | `a_fall_with_no_cell_to_stain_leaves_the_level_alone` |
+| the `tconstruct:.*` spawn blacklist, `spawnOnBlockEntities`, the vengeance-spirit exclusion | not ported | deviations 3–4 (none of the three is in this port's carried set) |
 
 ### Skills
 

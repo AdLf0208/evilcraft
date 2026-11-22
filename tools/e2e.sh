@@ -73,6 +73,16 @@
 #     jar's `minecraft:replaceable` entry is measured as inert at this pin (a stone placed
 #     onto a stain lands above it).
 #
+# Slice 6 — a fall death leaves a stain (`BlockBloodStain.bloodStainedBlockEvent`):
+#  V  a 20 HP zombie with 1 HP dropped down a one-cell shaft dies of the fall and the cell it
+#     died in becomes `evilcraft:blood_stain` holding 20 x 20 = **400 mB** (the max health is
+#     the field, so 400 and not the 20 a current-health reading would give), asserted in
+#     `/evilcraft stain` and in the block entity's own saved `fluids`;
+#  W  the same cell, the same zombie and a diamond sword instead of the fall: the cell stays
+#     `minecraft:air` (the death's differential — only a fall death stains);
+#  X  a second fall death on the stain V left: **800 mB** in the same cell, and no second
+#     stain above it (the counterfactual: a top-up, not a new block).
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
@@ -92,8 +102,8 @@
 # **without** the package, where the chest item never registers and the run must fail.
 #
 # SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
-# SELFTEST=blood flips Q's and SELFTEST=stain flips S's (each must FAIL), proving the
-# scenarios can fail. Phase I is the
+# SELFTEST=blood flips Q's, SELFTEST=stain flips S's and SELFTEST=fall flips V's (each must
+# FAIL), proving the scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
 # in its tank drops an item that carries no payload, which is exactly what a break the listener
@@ -1254,4 +1264,105 @@ ABOVE=$(block_name "$STX" 102 $((STZ - 2)))
     || fail "a stone placed onto a stain left $REPLACED in the cell and $ABOVE above it, expected the stain and a stone above"
 echo "  a stone placed onto a stain landed above it ($REPLACED stays, $ABOVE above): minecraft:replaceable is inert at this pin"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, and a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin)"
+echo "== V: a mob's fall death leaves a Blood Stain holding its blood =="
+# Upstream's `BlockBloodStain.bloodStainedBlockEvent`: a death from fall damage leaves
+# `bloodMBPerHP (20) x max health` mB in the cell the mob died in. The zombie carries one HP
+# so the **fall** is what kills it, and its max health is still 20: the 400 asserted below is
+# the field upstream multiplies, not the current health (which would give 20).
+FX=$((X0 + 4))
+FZ=-6
+ctl command "clear @s" >/dev/null
+ctl command "execute in minecraft:the_end run kill @e[type=!player,distance=..10]" >/dev/null 2>&1 || true
+ctl command "execute in minecraft:the_end run setblock $FX 101 $FZ minecraft:air" >/dev/null
+ctl wait 6 >/dev/null
+# A stone chimney around the column, its inside three cells wide: the zombie cannot drift out of
+# the cell it has to die in, and it is not squeezed into a wall (a 1-wide shaft killed the first
+# probe's zombie with `minecraft:in_wall`).
+ctl command "execute in minecraft:the_end run fill $((FX - 2)) 102 $((FZ - 2)) $((FX + 2)) 108 $((FZ + 2)) minecraft:stone" >/dev/null
+ctl command "execute in minecraft:the_end run fill $((FX - 1)) 102 $((FZ - 1)) $((FX + 1)) 108 $((FZ + 1)) minecraft:air" >/dev/null
+ctl wait 6 >/dev/null
+[ "$(block_name "$FX" 101 "$FZ")" = "minecraft:air" ] || fail "the fall cell is not clear"
+[ "$(block_name "$FX" 102 "$FZ")" = "minecraft:air" ] || fail "the fall shaft is not open"
+# The summon point is the centre of the target cell: `-6.5` is the centre of cell **-7**, so
+# the coordinates are computed, never concatenated.
+read -r FALL_X FALL_Z <<<"$(awk -v x="$FX" -v z="$FZ" 'BEGIN { printf "%.4f %.4f", x + 0.5, z + 0.5 }')"
+ctl command "execute in minecraft:the_end run tp @s $((FX - 6)).5 101 $FZ.5" >/dev/null
+ctl wait 6 >/dev/null
+
+# A one-HP zombie dropped six blocks down the chimney: it dies **of the fall**, in the cell
+# below the shaft (the arena floor is at 100, so its feet stop at 101).
+drop_a_zombie() {
+    local i
+    ctl command "execute in minecraft:the_end run summon minecraft:zombie $FALL_X 107 $FALL_Z {Health:1.0f}" >/dev/null \
+        || fail "cannot summon the falling zombie"
+    for i in $(seq 1 40); do
+        ctl wait 4 >/dev/null
+        [ "$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')" = 0 ] && return 0
+    done
+    fail "the zombie did not die of its fall: $(ctl entities 20 minecraft:zombie | jq -c '.entities[0:3]')"
+}
+
+drop_a_zombie
+FALL_CELL=$(block_name "$FX" 101 "$FZ")
+[ "$FALL_CELL" = "$STAIN" ] \
+    || fail "a fall death left '$FALL_CELL' at $FX,101,$FZ, expected a $STAIN"
+stain "$FX" 101 "$FZ"
+FALL_BLOOD=$TANK
+if [ "$SELFTEST" = fall ]; then
+    echo "(selftest=fall: asserting the fall death left no stain blood)"
+    FALL_BLOOD=0
+fi
+[ "$FALL_BLOOD" = 400 ] \
+    || fail "a 20 HP zombie's fall left a stain holding $FALL_BLOOD mB, expected 20 x 20 = 400"
+[ "$CAPACITY" = "$STAIN_TANK" ] || fail "the stain reports a $CAPACITY mB tank, expected $STAIN_TANK"
+saved_tank "$FX" 101 "$FZ"
+[ "$SAVED_MB" = 400 ] || fail "the stain's saved tank is $SAVED_MB mB, expected 400"
+echo "  the 20 HP zombie died of its fall and left $STAIN at $FX,101,$FZ holding $FALL_BLOOD mB"
+
+echo "== X: a second fall death on the same cell tops the stain up to 800 mB =="
+# The same shaft, the same cell: the first zombie left a stain there, and the second death
+# lands on it — upstream adds to the block entity it finds rather than placing a second block.
+drop_a_zombie
+[ "$(block_name "$FX" 101 "$FZ")" = "$STAIN" ] \
+    || fail "the stain at $FX,101,$FZ is gone after a second fall: '$(block_name "$FX" 101 "$FZ")'"
+[ "$(block_name "$FX" 102 "$FZ")" = "minecraft:air" ] \
+    || fail "a second stain was placed above the first ($(block_name "$FX" 102 "$FZ") at $FX,102,$FZ)"
+stain "$FX" 101 "$FZ"
+TOPPED=$TANK
+[ "$TOPPED" = 800 ] || fail "the second fall left $TOPPED mB, expected the first 400 plus 400"
+saved_tank "$FX" 101 "$FZ"
+[ "$SAVED_MB" = 800 ] || fail "the saved tank is $SAVED_MB mB after two falls, expected 800"
+echo "  a second fall death on the same cell: 400 -> $TOPPED mB in one stain, no second block"
+
+echo "== W: the same mob killed with a sword leaves the cell empty (the death's differential) =="
+# The same cell, the same mob, one difference: the killing blow. A sword kill is not a fall,
+# so no stain is placed — the blood in V and X can only come from the fall's damage type.
+ctl command "execute in minecraft:the_end run fill $((FX - 2)) 102 $((FZ - 2)) $((FX + 2)) 108 $((FZ + 2)) minecraft:air" >/dev/null
+ctl command "execute in minecraft:the_end run setblock $FX 101 $FZ minecraft:air" >/dev/null
+ctl wait 6 >/dev/null
+[ "$(block_name "$FX" 101 "$FZ")" = "minecraft:air" ] || fail "the test cell did not clear"
+ctl command "clear @s" >/dev/null
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_sword 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl command "execute in minecraft:the_end run tp @s $((FX - 2)).5 101 $FZ.5" >/dev/null
+ctl wait 6 >/dev/null
+ctl command "execute in minecraft:the_end run summon minecraft:zombie $FALL_X 101 $FALL_Z {NoAI:1b}" >/dev/null \
+    || fail "cannot summon the sword target"
+ctl wait 8 >/dev/null
+SWORD_ZID=$(ctl entities 12 minecraft:zombie | jq -r '.entities[0].id // ""')
+[ -n "$SWORD_ZID" ] || fail "the sword target is not among the entities: $(ctl entities 12 | jq -c '.entities[0:3]')"
+ctl look-at-entity "$SWORD_ZID" >/dev/null || fail "cannot face the sword target"
+for _ in $(seq 1 8); do
+    ctl attack "$SWORD_ZID" >/dev/null 2>&1 || true
+    ctl wait 12 >/dev/null
+    [ "$(ctl entities 12 minecraft:zombie | jq -r '.entities | length')" = 0 ] && break
+done
+[ "$(ctl entities 12 minecraft:zombie | jq -r '.entities | length')" = 0 ] \
+    || fail "the sword target survived eight blows: $(ctl entities 12 | jq -c '.entities[0:3]')"
+SWORD_CELL=$(block_name "$FX" 101 "$FZ")
+[ "$SWORD_CELL" = "minecraft:air" ] \
+    || fail "a sword kill left '$SWORD_CELL' where the fall left a stain; only a fall death may stain"
+echo "  the same cell after a sword kill is $SWORD_CELL (no stain)"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, and the same zombie killed with a sword leaves the cell empty"

@@ -96,10 +96,12 @@ impl Hooks for Mod {
         tank::on_drops(level, event)
     }
 
-    /// A mob or player died: the extractors the player credited with the kill carries take
-    /// its blood (upstream's `ItemBloodExtractor.fillForAllBloodExtractors`, on the same
-    /// `LivingDeathEvent`; a mob's or the environment's kill is not the player's).
+    /// A mob or player died: a **fall** leaves a Blood Stain holding its blood
+    /// (`BlockBloodStain.bloodStainedBlockEvent`), and the extractors the player credited
+    /// with the kill take it (upstream's `ItemBloodExtractor.fillForAllBloodExtractors`, on
+    /// the same `LivingDeathEvent`; a mob's or the environment's kill is not the player's).
     fn living_death(&self, host: &mut dyn ServerHost, event: &mut LivingDeathEvent<'_>) -> Flow {
+        stain::on_death(host, event);
         blood::on_living_death(host, event);
         Flow::Continue
     }

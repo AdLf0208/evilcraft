@@ -310,8 +310,8 @@ fn fill_for(host: &mut dyn ServerHost, player: PlayerRef, health: f32) {
     }
 }
 
-/// The killed mob's maximum health, the number upstream multiplies.
-fn max_health(host: &dyn Host, entity: u32) -> Option<f32> {
+/// The killed mob's maximum health, the number upstream multiplies (the stain's blood too).
+pub(crate) fn max_health(host: &dyn Host, entity: u32) -> Option<f32> {
     let entity = host.entity(entity)?;
     let living = host.living(entity)?;
     living.max_health(host)
