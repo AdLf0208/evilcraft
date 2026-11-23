@@ -392,12 +392,17 @@ fn pour(
     // the extractor's crouching click (the dark tank's rule), so a standing click pours
     // nothing and puts the extractor in the slot instead.
     let crouching = player.is_secondary_use_active(&*host).unwrap_or(false);
+    // One amount belongs to one extractor; a stack is split by the inventory first.
+    let single = crate::runtime::one_extractor(stack.count());
     let blood = crate::blood::extractor_blood(stack);
     probe(
         host,
-        format!("pour: pos={pos:?} crouching={crouching} blood={blood} hand={hand:?}"),
+        format!(
+            "pour: pos={pos:?} crouching={crouching} blood={blood} count={} hand={hand:?}",
+            stack.count()
+        ),
     );
-    if !crouching || blood <= 0 {
+    if !crouching || !single || blood <= 0 {
         return false;
     }
     let Some(level) = player.level(&*host) else {
@@ -467,6 +472,15 @@ fn insert(host: &mut dyn ServerHost, click: BlockClick<'_>) -> bool {
         probe(host, "insert: no held stack");
         return false;
     };
+    // Taking one extractor out of a legacy stack would copy the stack's one amount onto the
+    // item taken (`shrink(1)` keeps the components). The inventory resolves such a stack
+    // first (the item is unstackable); until then the machine refuses it.
+    if held.item().id(&*host) == crate::runtime::EXTRACTOR
+        && !crate::runtime::one_extractor(held.count())
+    {
+        probe(host, "insert: a stacked extractor is not a container");
+        return false;
+    }
     let Some(player) = host.player(click.player) else {
         probe(host, "insert: no player handle");
         return false;

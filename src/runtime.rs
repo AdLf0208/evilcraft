@@ -238,10 +238,28 @@ fn anvil_target(item: &str) -> Option<&'static str> {
 /// or nothing when it is not a broken anvil or the tank cannot pay.
 #[must_use]
 pub fn anvil_step(item: &str, tank: i32) -> Option<(&'static str, i32)> {
-    if tank < ANVIL_MB {
+    anvil_stack_step(item, 1, tank)
+}
+
+/// One step for a **stack** of `count` broken anvils: `(item each becomes, tank)` after
+/// the step, or nothing when it is not a broken anvil or the tank cannot pay for all of
+/// them.
+///
+/// Upstream's `AnvilRepairAction.repair` answers a fresh `ItemStack` of **one** item, so a
+/// stack of anvils lost every item but the first (and every component on it) — a data-loss
+/// defect this port does not reproduce (AGENTS.md, "Upstream defects"). The price stays
+/// upstream's: `ANVIL_MB` for each anvil converted. A tank that cannot pay for the whole
+/// stack leaves it untouched, so no step can ever drop an anvil.
+#[must_use]
+pub fn anvil_stack_step(item: &str, count: u32, tank: i32) -> Option<(&'static str, i32)> {
+    if count == 0 {
         return None;
     }
-    anvil_target(item).map(|next| (next, tank - ANVIL_MB))
+    let price = ANVIL_MB.checked_mul(i32::try_from(count).ok()?)?;
+    if tank < price {
+        return None;
+    }
+    anvil_target(item).map(|next| (next, tank - price))
 }
 
 /// What a broken machine's own item carries (`LootFunctionCopyTankData`): the tank's
@@ -322,6 +340,35 @@ pub fn fill_extractor(held: i32, pool: i32) -> (i32, i32) {
     let room = (EXTRACTOR_CAPACITY - held).max(0);
     let moved = pool.clamp(0, room);
     (held + moved, pool - moved)
+}
+
+/// Whether a stack of `count` Blood Extractors may be filled or drained as it stands.
+///
+/// The amount is stored **once per stack** (`minecraft:custom_data.evilcraft:blood`), so a
+/// stack of two is one amount, not two: a fill on it is counted once for two items (loss),
+/// and every later split of the stack copies the amount onto each item (duplication). The
+/// item is therefore unstackable (`max_stack_size = 1`), and only a single extractor is a
+/// container; a larger stack is a save from before that fix and is resolved first
+/// ([`legacy_extractors`]).
+#[must_use]
+pub fn one_extractor(count: u32) -> bool {
+    count == 1
+}
+
+/// How a stack of `count` extractors holding `blood` is resolved: one amount per item, the
+/// **first** taking the whole stored amount (clamped to the item's own 5,000 mB) and the
+/// rest empty. `None` for a single extractor, which needs no resolution.
+///
+/// The sum is the amount the stack stored — the rule conserves blood exactly, and the item
+/// count travels unchanged: nothing is duplicated and nothing is lost.
+#[must_use]
+pub fn legacy_extractors(count: u32, blood: i32) -> Option<Vec<i32>> {
+    if count <= 1 {
+        return None;
+    }
+    let mut amounts = vec![0; usize::try_from(count).ok()?];
+    amounts[0] = blood.clamp(0, EXTRACTOR_CAPACITY);
+    Some(amounts)
 }
 
 /// One crouching click with a Blood Extractor on a Blood Stain, as upstream's
@@ -1468,5 +1515,72 @@ mod tests {
         assert_eq!(PURIFIER_PURIFY_SLOT, 0);
         assert_eq!(PURIFIER_TANK, 3 * BUCKET);
         assert_eq!(PURIFIER, "evilcraft:purifier");
+    }
+
+    #[test]
+    fn a_stack_of_broken_anvils_is_repaired_whole_for_one_hundred_twenty_five_mb_each() {
+        // Review finding 1: `AnvilRepairAction` answers a fresh stack of **one** anvil, so the
+        // port must not reproduce it — a stack of N becomes N of the next state, at 125 mB each.
+        assert_eq!(
+            anvil_stack_step(CHIPPED_ANVIL, 2, 2 * ANVIL_MB),
+            Some((ANVIL, 0)),
+            "two chipped anvils become two anvils for 250 mB"
+        );
+        assert_eq!(
+            anvil_stack_step(DAMAGED_ANVIL, 3, 3 * ANVIL_MB + 5),
+            Some((CHIPPED_ANVIL, 5)),
+            "three damaged anvils become three chipped ones for 375 mB"
+        );
+        // A tank that cannot pay for **all** of them leaves the stack alone: no partial
+        // replacement and no lost anvil.
+        assert_eq!(
+            anvil_stack_step(CHIPPED_ANVIL, 2, 2 * ANVIL_MB - 1),
+            None,
+            "249 mB cannot convert two anvils"
+        );
+        // One item is the upstream price, unchanged, and a whole or ordinary item has no step.
+        assert_eq!(
+            anvil_stack_step(CHIPPED_ANVIL, 1, ANVIL_MB),
+            Some((ANVIL, 0))
+        );
+        assert_eq!(anvil_stack_step(ANVIL, 2, 1_000), None);
+        assert_eq!(anvil_stack_step("minecraft:stone", 2, 1_000), None);
+        // A zero count is no stack at all.
+        assert_eq!(anvil_stack_step(CHIPPED_ANVIL, 0, 1_000), None);
+    }
+
+    #[test]
+    fn a_legacy_stack_of_extractors_resolves_to_the_first_holding_all_the_blood() {
+        // Review finding 2: the amount is stored once per stack, so resolving a stack of N
+        // must give the whole amount to the first extractor and nothing to the rest.
+        let amounts = legacy_extractors(2, 4_000).expect("a stack of two resolves");
+        assert_eq!(
+            amounts,
+            vec![4_000, 0],
+            "the first takes the stack's 4,000 mB"
+        );
+        assert_eq!(
+            amounts.iter().sum::<i32>(),
+            4_000,
+            "the resolved stack holds exactly the blood it stored"
+        );
+        assert_eq!(
+            legacy_extractors(3, 0),
+            Some(vec![0, 0, 0]),
+            "an empty stack of three resolves to three empty extractors"
+        );
+        // A stored amount above the item's own tank (a `/give`d payload) clamps on the item
+        // that keeps it, exactly as `extractor_blood` reads it.
+        assert_eq!(
+            legacy_extractors(2, EXTRACTOR_CAPACITY + 500),
+            Some(vec![EXTRACTOR_CAPACITY, 0])
+        );
+        // One extractor is already a container and resolves to nothing.
+        assert_eq!(legacy_extractors(1, 4_000), None);
+        assert_eq!(legacy_extractors(0, 4_000), None);
+        // And no drain may treat a stack of more than one as a container.
+        assert!(one_extractor(1));
+        assert!(!one_extractor(2));
+        assert!(!one_extractor(0));
     }
 }

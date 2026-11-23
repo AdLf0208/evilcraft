@@ -213,6 +213,12 @@ fn draw(host: &mut dyn ServerHost, player: PlayerRef, event: &UseOnEvent<'_>) ->
     if !player.is_secondary_use_active(&*host).unwrap_or(false) {
         return false;
     }
+    // A stack of extractors is not a container: its amount belongs to the stack, so a draw
+    // onto it would write the same blood onto every item. The inventory's own tick splits
+    // such a stack first (the item is unstackable); until then nothing moves.
+    if !crate::runtime::one_extractor(event.stack.count()) {
+        return false;
+    }
     let Some(level) = player.level(&*host) else {
         return false;
     };

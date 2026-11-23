@@ -110,6 +110,10 @@ fn fill(host: &mut dyn ServerHost, player: PlayerRef, event: &UseOnEvent<'_>) ->
     if !player.is_secondary_use_active(&*host).unwrap_or(false) {
         return false;
     }
+    // One amount belongs to one extractor; a stack is split by the inventory first.
+    if !crate::runtime::one_extractor(event.stack.count()) {
+        return false;
+    }
     let Some(level) = player.level(&*host) else {
         return false;
     };

@@ -511,3 +511,68 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 11/11 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 10 (0.2.10) — the three review findings
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 10**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`. Every compile step ran through `ports/tools/build-slot.sh`
+(`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`).
+
+Two findings were **data-loss bugs in shipped versions**: the anvil step replaced a whole stack
+with one anvil (0.2.7/0.2.8), and the extractor stacked while its blood is stored once per stack
+(0.2.5–0.2.8). The rules adopted: **preserve the count and components and charge per item** (a
+stack of N anvils costs N × 125 mB, and a tank that cannot pay for all N leaves the stack alone);
+**the extractor is unstackable**, and a legacy stack is resolved by giving the whole amount to the
+first extractor and handing the empty rest back. The third finding (attribution) is a docs fix:
+`LICENSE-NOTICE.md` names all ten carried upstream infusion recipe files (nine `convenience/` +
+`base/blook.json`), each `cmp`-identical to the jar.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` with `anvil_stack_step` at one item's price and `legacy_extractors`/`one_extractor` stubbed | **FAILED 2/73** (71 passed, 2 failed) — *a stack of two resolves*, *left: Some(("minecraft:anvil", 125)) / right: Some(("minecraft:anvil", 0))* | `sdk-test-red-slice10.log` |
+| tests (green) | `cargo test` | **73 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 573 API uses, 19 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **225,856 B** `dbbdf5d865689c45d98ab4151fefe00fad04f29f64ac7f669922a9c5364013ef`, `CMP-IDENTICAL`, 113 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check.log` |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91…` | exit 0 — `0a875da  made for` | `sdk-fits.log` |
+| fits (another build) | `… --build 0b14f8ac…` | exit 0 — `0b14f8a  fits` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** (73 tests, 0 clippy warnings, runtime byte-identical, package matches the tree, check + fits, Skills line) | job report |
+| artifact record | `sdk-artifact-0.2.10.txt` | bytes/sha/entries/manifest, every packed `src/` file's sha, check and fits lines, the packed tree | `sdk-artifact-0.2.10.txt` |
+| export check | `diff -r`/`cmp` the launcher's export against the port | identical in `src/`, `data/`, `assets/` and the manifest, `version = "0.2.10"`, tag `native-0a875da-f804bd58891f` | `sdk-export-check-0.2.10.log` |
+
+Launcher build: `native-0a875da-f804bd58891f`, log line `Compiling evilcraft (1 of 1)`.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1` for the 0.2.3 export, `LEGACY=1` for the 0.2.9 one) | **`PASS` + `EXIT:0`** — the two previous-package legs, A, A2, B–F, D2, D3, E2, H–W, Y, Y2, Z, AA–AI | `e2e-launcher-0.2.10.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.10.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C — *the pickaxe was not repaired in 59 ticks* | `e2e-launcher-selftest-0.2.10.log` |
+| selftest (finding 1) | `SELFTEST=anvil` | **`FAIL` + `EXIT:1`** at D2 — *the repaired stack … count only 1* | `e2e-launcher-selftest-anvil-0.2.10.log` |
+| selftest (finding 2) | `SELFTEST=extractor` | **`FAIL` + `EXIT:1`** at E2 — *the legacy stack reads as 1 extractor slot(s)* | `e2e-launcher-selftest-extractor-0.2.10.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=16 ok=16 missing-exit=0
+bad-exit=0` (exit 0). The ten earlier legs stay green in the same default run.
+
+What the new phases measured (from `e2e-launcher-0.2.10.log`):
+
+- **the 0.2.9 leg** writes the legacy save: one stack of two extractors, `held: 4000/5000 mB` —
+  0.2.9's item had no `max_stack_size`, so that is a stack a pre-fix player really holds.
+- **D2**: the same stack in a Blood Chest is untouched at 125 mB
+  (`{components: {"minecraft:custom_name": '"Two anvils"'}, count: 2, Slot: 2b, id: "minecraft:chipped_anvil"}`)
+  and becomes **two** anvils for 250 mB with the name kept
+  (`… count: 2, Slot: 2b, id: "minecraft:anvil"`), tank 250 → 0.
+- **D3**: a damage-244 enchanted pickaxe is repaired (244 → 217 over 40 ticks) and its saved stack
+  still carries `minecraft:enchantments: {minecraft:sharpness: 3}` at `count: 1`.
+- **E2**: the legacy stack resolves into **two single extractors** (2 items), the first reading
+  4,000 mB and the second 0; a crouching click on a 3,500 mB stain draws exactly 1,000 mB into the
+  first (5,000) and leaves the second at 0.
+- **Y2**: the Colossal Blood Chest does the same anvil step as D2 (two anvils for 250 mB, name
+  kept; 125 mB leaves the stack alone) — the machine the finding names has its own code path.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 16/16 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.

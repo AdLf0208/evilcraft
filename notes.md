@@ -2322,3 +2322,234 @@ same behaviour with the shipped defaults.
 ### Skills
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 10 — the three review findings, and two data-loss bugs fixed (0.2.10)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.10**
+on top of the published 0.2.9 (the publisher appends to the retained PR #1680; the registry entry,
+the PR and the ledger are the orchestrator's).
+
+This slice is a **review fix**, not a new family: three findings, the first two data-loss bugs in
+shipped versions (0.2.5–0.2.8). No tier question arises — the port stays **content / deep**, and
+the fixes are inside families already carried (the repair action, the extractor's stack shape).
+
+### Finding 1 — the anvil step replaced the whole stack (`src/colossal.rs:100-117`, 0.2.7–0.2.8)
+
+`AnvilRepairAction.repair` answers `new ItemStack(anvil)`: **one** item, whatever the stack held,
+and `RepairItemTickAction` writes that answer back into the slot. The Java mod therefore turns a
+stack of N broken anvils into one anvil and drops the other N−1 items *and every component of the
+stack* (a custom name included) — and 0.2.7/0.2.8 reproduced it in `colossal.rs`, with the same
+code in `blood.rs` for the plain Blood Chest.
+
+**Rule adopted: preserve the count and components, and charge per item.** A stack of N broken
+anvils becomes N of the next anvil state for **N × 125 mB**, its component patch copied over, and
+a tank that cannot pay for all N leaves the stack **untouched** — no partial replacement, no lost
+anvil. `runtime::anvil_stack_step(item, count, tank)` is the rule (`anvil_step` now delegates with
+count 1, so the upstream price is unchanged); `blood::anvil_stack` builds the new stack with
+`set_count` + `set_components(from.components().as_nbt())`. Both machines call it.
+
+Anvils stack to 64 in vanilla, so this is a stack a player really has; a stack of two *pickaxes*
+cannot exist at any legal stack limit (tools are max 1), which is why the in-game proof uses the
+legal case (a custom-named chipped-anvil stack) plus an enchanted pickaxe for the component half.
+
+### Finding 2 — the extractor was stackable (`src/stain.rs:229-246`, 0.2.5–0.2.8)
+
+The amount is stored **once per stack** (`minecraft:custom_data.evilcraft:blood`), so a drain on a
+stack of N debited the source once and wrote the result onto all N items; the next split of that
+stack copied the amount onto each item (duplication), and a fill was counted once for N (loss). The
+Java item declared no stack limit either, so upstream shares the defect.
+
+**Rules adopted:**
+
+1. **The item is unstackable**: `data/evilcraft/horizon/item/blood_extractor.json` declares
+   `"max_stack_size": 1`.
+2. **A legacy stack is resolved deterministically** (`runtime::legacy_extractors(count, blood)`):
+   the **first** extractor keeps the whole stored amount (clamped to the item's 5,000 mB) and the
+   others are empty. The sum equals what the stack stored and the item count is unchanged, so
+   nothing is duplicated and nothing is lost. The stack's other components (a custom name) travel
+   on each resolved item, as a vanilla split copies them.
+3. **No drain path writes onto a stack of more than one** (`runtime::one_extractor(count)`): the
+   stain draw, the dark tank pour, the purifier pour, the three machines' container slot and the
+   purifier's insert all refuse one, and `fill_for` resolves before it fills.
+4. **Where the stack is resolved**: the extractor's `ItemPart::inventory_tick` (server, per carried
+   stack) writes the kept extractor back into its slot and `/give`s the empty extras back to the
+   player (`PlayerRef::give_stack`, overflow dropped at their feet). A machine's container slot
+   leaves a stacked extractor alone — the player takes it out and their inventory resolves it.
+
+Cost: the tick Part runs only for stacks of this item, and returns after one count check for the
+normal single extractor.
+
+### Finding 3 — attribution of the carried infusion recipes
+
+0.2.8's `LICENSE-NOTICE.md` credited the carried textures only; the **nine** carried
+`convenience/` infusion recipes (the finding's count at 0.2.8) and the `base/blook.json` 0.2.9
+added were uncredited. The notice now names **all ten** files, each verified `cmp`-identical to
+`evilcraft-1.21.1-neoforge-1.2.100.jar`, and states the only change (the `convenience/` directory
+flattened into `recipe/blood_infuser/`). The same pass added the Blook's and the Purifier's
+textures, the `purifier` blockstate and the `dark_tank` item model to the "carried unchanged" list
+(same class of omission).
+
+### TDD: the red proof, before the implementation
+
+`src/runtime.rs` gained both rules as stubs holding the old behaviour (`anvil_stack_step` charged
+one item whatever the stack held; `legacy_extractors` → `None`; `one_extractor` → true for every
+count) and the two tests. `sdk-test-red-slice10.log` (test step exit 101):
+
+```
+test result: FAILED. 71 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+---- runtime::tests::a_legacy_stack_of_extractors_resolves_to_the_first_holding_all_the_blood stdout ----
+thread 'runtime::tests::a_legacy_stack_of_extractors_resolves_to_the_first_holding_all_the_blood' (1088259) panicked at src/runtime.rs:1550:51:
+a stack of two resolves
+
+---- runtime::tests::a_stack_of_broken_anvils_is_repaired_whole_for_one_hundred_twenty_five_mb_each stdout ----
+thread 'runtime::tests::a_stack_of_broken_anvils_is_repaired_whole_for_one_hundred_twenty_five_mb_each' (1088269) panicked at src/runtime.rs:1521:9:
+assertion `left == right` failed: two chipped anvils become two anvils for 250 mB
+  left: Some(("minecraft:anvil", 125))
+ right: Some(("minecraft:anvil", 0))
+
+failures:
+    runtime::tests::a_legacy_stack_of_extractors_resolves_to_the_first_holding_all_the_blood
+    runtime::tests::a_stack_of_broken_anvils_is_repaired_whole_for_one_hundred_twenty_five_mb_each
+```
+
+Green: `sdk-test.log` — **73 passed, 0 failed** (71 + 2); `sdk-clippy.log` — `cargo fmt --check`
+clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 2/73** (71 passed, 2 failed), exit 101 | `sdk-test-red-slice10.log` |
+| tests (green) | `cargo test` | **73 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 573 API uses, **19 hooks**, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **225,856 B**, sha256 `dbbdf5d8…4013ef`, **`CMP-IDENTICAL`**, 113 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8a` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (73 tests, 0 clippy warnings, runtime byte-identical, package matches the tree, check + fits, Skills line) | job report |
+| artifact record | `sdk-artifact-0.2.10.txt` | bytes/sha/entries/manifest, every packed `src/` file's sha, check and fits lines, the packed tree | `sdk-artifact-0.2.10.txt` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → tag `native-0a875da-f804bd58891f`, log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/`, `assets/` and `horizon-mod.toml` are
+byte-identical to the port (`diff -r`/`cmp` empty, `version = "0.2.10"`,
+`sdk-export-check-0.2.10.log`).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1` for 0.2.3 and `LEGACY=1` for 0.2.9) | **`PASS` + `EXIT:0`** (the 0.2.3 and 0.2.9 legs, A, A2, B–F, **D2**, **D3**, **E2**, H–W, Y, **Y2**, Z, AA–AI) | `e2e-launcher-0.2.10.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.10.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C (*the pickaxe was not repaired in 59 ticks*) | `e2e-launcher-selftest-0.2.10.log` |
+| selftest (finding 1) | `SELFTEST=anvil` | **`FAIL` + `EXIT:1`** at D2 (*the repaired stack … count only 1*) | `e2e-launcher-selftest-anvil-0.2.10.log` |
+| selftest (finding 2) | `SELFTEST=extractor` | **`FAIL` + `EXIT:1`** at E2 (*the legacy stack reads as 1 extractor slot(s)*) | `e2e-launcher-selftest-extractor-0.2.10.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=16 ok=16 missing-exit=0
+bad-exit=0` (exit 0): the ten earlier legs stay green, and the four new logs are this slice's.
+
+The **legacy save** is written by the 0.2.9 export (`legacy_leg`, a separate launch on the same
+scratch world): 0.2.9's item declared no `max_stack_size`, so `/item replace … 2` + `/evilcraft
+held 4000` leave one stack of two extractors carrying the amount once — exactly what an old save
+holds. The main 0.2.10 launch continues that world, so the resolution under test is the real one.
+
+Transcript of the new phases (verbatim from `e2e-launcher-0.2.10.log`):
+
+```
+== the previous package (0.2.9): a save with one stack of two Blood Extractors ==
+  Blood Extractor held: 4000/5000 mB, t=96.
+  0.2.9 save: one stack of 2 extractors carrying 4,000 mB once
+== D2: a stack of broken anvils is repaired whole, one price each (review finding 1) ==
+  Blood Chest [202, 101, 0]: tank 0/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0 1:minecraft:anvil@0 2:minecraft:chipped_anvil@0], t=591
+  Blood Chest [202, 101, 0]: tank 125/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0 1:minecraft:anvil@0 2:minecraft:chipped_anvil@0], t=625
+  202, 101, 0 has the following block data: {components: {"minecraft:custom_name": '"Two anvils"'}, count: 2, Slot: 2b, id: "minecraft:chipped_anvil"}
+  125 mB: the stack of two chipped anvils is untouched
+  Blood Chest [202, 101, 0]: tank 0/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0 1:minecraft:anvil@0 2:minecraft:anvil@0], t=665
+  202, 101, 0 has the following block data: {components: {"minecraft:custom_name": '"Two anvils"'}, count: 2, Slot: 2b, id: "minecraft:anvil"}
+  two anvils for 250 mB: count 2
+  the custom name travelled with both anvils
+== D3: a damaged enchanted pickaxe is repaired, and keeps its enchantment ==
+  Blood Chest [202, 101, 0]: tank 970/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0 1:minecraft:anvil@0 2:minecraft:anvil@0 3:minecraft:diamond_pickaxe@244], t=730
+  Blood Chest [202, 101, 0]: tank 835/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0 1:minecraft:anvil@0 2:minecraft:anvil@0 3:minecraft:diamond_pickaxe@217], t=783
+  202, 101, 0 has the following block data: {components: {"minecraft:enchantments": {"minecraft:sharpness": 3}, "minecraft:damage": 211}, count: 1, Slot: 3b, id: "minecraft:diamond_pickaxe"}
+  one pickaxe, repaired from damage 244 to 217
+  the enchantment survived the repair
+== E2: a legacy stack of two extractors is split before any drain (review finding 2) ==
+  the 0.2.9 stack of two resolved into 2 single extractors (2 items)
+  Blood Extractor held: 4000/5000 mB, t=815.
+  Blood Extractor held: 0/5000 mB, t=825.
+  placed evilcraft:blood_stain at 204,101,4
+  crouch + right-click on 204,101,4 (aim on evilcraft:blood_stain)
+  Blood Stain [204, 101, 4]: tank 2500/5000 mB, t=902
+  Blood Extractor held: 5000/5000 mB, t=908.
+  Blood Extractor held: 0/5000 mB, t=917.
+  the crouching click drew 1,000 mB into one extractor (4,000 -> 5,000); the other still holds 0 mB
+...
+== Y2: the Colossal Blood Chest repairs a whole anvil stack, one price each ==
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 125/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@0 1:minecraft:chipped_anvil@0], t=11911
+  198, 101, -10 has the following block data: {components: {"minecraft:custom_name": '"Colossal pair"'}, count: 2, Slot: 1b, id: "minecraft:chipped_anvil"}
+  125 mB: the colossal's stack of two is untouched
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 0/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@0 1:minecraft:anvil@0], t=11947
+  198, 101, -10 has the following block data: {components: {"minecraft:custom_name": '"Colossal pair"'}, count: 2, Slot: 1b, id: "minecraft:anvil"}
+  the colossal converted both anvils (count 2)
+  the custom name travelled with both anvils
+```
+
+**Fail-capable, four ways.** (1) `SELFTEST=anvil` inverts D2's count and exits 1 — the log above;
+the same inversion of any single-item step would pass (a tank of 125 leaves the stack alone, which
+the same phase asserts, so a one-item implementation cannot satisfy both). (2) `SELFTEST=extractor`
+inverts E2's split and exits 1. (3) E2's drain is the differential for "not onto a second": the same
+click fills one extractor to 5,000 and the other still reads 0. (4) The whole-package control has no
+extractor, anvil or stain, so none of the phases can even run.
+
+### Upstream defects fixed
+
+1. **`AnvilRepairAction` destroys a stack of anvils** (one item returned for N, components lost) —
+   proved from the class (`return Pair.of(25F, new ItemStack(itemStack.getItem() == Items.CHIPPED_ANVIL
+   ? Items.ANVIL : Items.CHIPPED_ANVIL));`) and from `RepairItemTickAction.onTick`, which writes
+   the answer back into the slot. The port keeps the count and the components and charges 125 mB
+   each; a user notices that a stack of anvils is no longer swallowed. Worth an upstream report.
+2. **The Blood Extractor stacks and shares one amount** (`ItemBloodExtractor`'s `Item.Properties()`
+   sets no `stacksTo`; NeoForge's per-stack fluid handler then fills the whole stack once). The port
+   makes the item unstackable and resolves a legacy stack losslessly; a user notices two extractors
+   instead of one stack, and never a second extractor carrying the first one's blood.
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| the Blood Chest's anvil step on a **stack** | tested | D2: 2 chipped anvils → 2 anvils for 250 mB, custom name kept; 125 mB leaves them; unit `a_stack_of_broken_anvils_is_repaired_whole_for_one_hundred_twenty_five_mb_each` |
+| the Colossal Blood Chest's anvil step on a stack | tested | Y2: the same pair on the machine the finding names (the two machines are separate code paths) |
+| a damaged stack's repair keeps count and components | tested | D3: a count-1 enchanted pickaxe keeps `minecraft:enchantments` (sharpness 3) through 27 damage points; D2 keeps the anvil stack's count and `custom_name` |
+| the extractor's stack shape | tested | the item declares `max_stack_size: 1`; E2's resolution and the 0.2.9 save that produced the stack |
+| a legacy extractor stack (a pre-fix save) | tested | E2: 2 singles, 4,000 + 0, then a drain into one (5,000) leaves the other at 0; unit `a_legacy_stack_of_extractors_resolves_to_the_first_holding_all_the_blood` |
+| the carried infusion recipes' attribution | tested (file bytes) | `LICENSE-NOTICE.md` names the ten files; each `cmp`-identical to the 1.2.100 jar |
+| the extractor in a machine container slot | **refused, not split** | deviation 1 below: the player takes it out and the inventory resolves it (unit `one_extractor`) |
+
+### Deviations this slice adds
+
+1. **A machine's container slot does not resolve a legacy stack.** It has no player to hand the
+   extra items to, and it must not read the one amount as N items; it leaves the stack alone (no
+   blood moves) until the player takes it out. Upstream had no legacy state to handle at all.
+2. **The resolution's extras are `/give`n**, so a full inventory drops them at the player's feet
+   (vanilla's `/give` overflow) rather than somewhere the port invents.
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+### Changelog for the record (0.2.10, verbatim)
+
+> 0.2.10 — review fixes on top of 0.2.9. The Blood Chest and the Colossal Blood Chest no longer
+> replace a stack of broken anvils with one anvil: a stack of N becomes N anvils for 125 mB each,
+> with its components kept, and a tank that cannot pay for all N leaves the stack untouched. The
+> Blood Extractor is unstackable (`max_stack_size: 1`); a stack from an older save is resolved
+> before any drain — the first extractor keeps the whole stored amount, the others are empty and
+> handed back — so no blood is duplicated and no item is lost, and no drain path ever writes onto
+> a stack of more than one. `LICENSE-NOTICE.md` now credits all ten carried upstream Blood Infuser
+> recipe files (nine `convenience/` files, their directory flattened, and `base/blook.json`), each
+> byte-identical to the jar, and the Blook's and Purifier's textures and two more upstream
+> blockstates/models. 73 tests, two identical builds, the in-game leg green (two new phases on the
+> anvil stack and the legacy extractor stack, plus two selftests that fail as they must).

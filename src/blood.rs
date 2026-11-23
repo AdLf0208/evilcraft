@@ -17,15 +17,15 @@ use mod_api::{
     self, BlockEntityEvent, BlockEntityPart, BlockEntityRef, BlockEntityTickEvent,
     BlockEntityTicksEvent, BlockPart, ClientHost, Command, CommandArgumentValue, CommandInvocation,
     CommandSource, Component, Compound, EntityRef, Flow, Hand, Host, HostTransaction, Identifier,
-    ItemPart, ItemPlace, ItemStack, LevelRef, LevelSide, LivingDeathEvent, ModContainer,
-    ModFluidTanks, PlayerRef, RandomSource, RegisterCommandsEvent, RunModCommandEvent, Screen,
-    ScreenDrawEvent, ScreenEvent, ServerHost, Tag, Text, TooltipEvent,
+    InventoryTickEvent, ItemPart, ItemPlace, ItemStack, LevelRef, LevelSide, LivingDeathEvent,
+    ModContainer, ModFluidTanks, PlayerRef, RandomSource, RegisterCommandsEvent,
+    RunModCommandEvent, Screen, ScreenDrawEvent, ScreenEvent, ServerHost, Tag, Text, TooltipEvent,
 };
 
 use crate::runtime::{
     BLOOD, CHEST_SLOTS, CONTAINER_SLOT, Credit, EXTRACTOR, EXTRACTOR_CAPACITY, SLOT_COUNT,
-    TANK_CAPACITY, anvil_step, blood_from_kill, can_hold, drain_container, fill_extractor,
-    kill_span, repair, repair_due,
+    TANK_CAPACITY, anvil_stack_step, blood_from_kill, can_hold, drain_container, fill_extractor,
+    kill_span, legacy_extractors, one_extractor, repair, repair_due,
 };
 
 /// The block entity type: a bare name, so the mod's namespace qualifies it.
@@ -87,20 +87,27 @@ impl BlockEntityPart for Chest {
         }
         let mut tank = read_tank(&entity.nbt);
         // The container slot empties a blood container into the tank, as upstream's
-        // `EmptyFluidContainerInTankTickAction` does.
+        // `EmptyFluidContainerInTankTickAction` does. A stack from before the item was
+        // unstackable is left alone: its one amount cannot be debited for several items
+        // without losing or duplicating blood, so the player takes it out and the
+        // inventory resolves it (`Extractor::inventory_tick`).
         if let Some(container) = entity.items[CONTAINER_SLOT].take() {
-            // The container stays in its slot once emptied, as upstream's
-            // `EmptyFluidContainerInTankTickAction` leaves it; the old code dropped the
-            // extractor item when its last blood went into the tank. Any other item is
-            // left exactly as it was: only an extractor carries blood.
-            let extractor = container.item().id(host) == EXTRACTOR;
-            let (filled, keeps) = drain_container(tank, extractor_blood(&container));
-            tank = filled;
-            entity.items[CONTAINER_SLOT] = Some(if extractor {
-                with_extractor_blood(&container, keeps)
+            if container.item().id(host) == EXTRACTOR && !one_extractor(container.count()) {
+                entity.items[CONTAINER_SLOT] = Some(container);
             } else {
-                container
-            });
+                // The container stays in its slot once emptied, as upstream's
+                // `EmptyFluidContainerInTankTickAction` leaves it; the old code dropped the
+                // extractor item when its last blood went into the tank. Any other item is
+                // left exactly as it was: only an extractor carries blood.
+                let extractor = container.item().id(host) == EXTRACTOR;
+                let (filled, keeps) = drain_container(tank, extractor_blood(&container));
+                tank = filled;
+                entity.items[CONTAINER_SLOT] = Some(if extractor {
+                    with_extractor_blood(&container, keeps)
+                } else {
+                    container
+                });
+            }
         }
         let ticks = read_int(&entity.nbt, TICKS).unwrap_or(0).max(0) as u32;
         if repair_due(ticks) {
@@ -118,8 +125,9 @@ impl BlockEntityPart for Chest {
                             write_damage(&mut stack, u32::try_from(left).unwrap_or(0));
                             tank = tank_left;
                         }
-                    } else if let Some((next, tank_left)) = anvil_step(&item, tank)
-                        && let Some(whole) = item_stack(host, next)
+                    } else if let Some((next, tank_left)) =
+                        anvil_stack_step(&item, stack.count(), tank)
+                        && let Some(whole) = anvil_stack(host, next, &stack)
                     {
                         stack = whole;
                         tank = tank_left;
@@ -177,6 +185,40 @@ impl ItemPart for Extractor {
             Text::literal(format!("Blood: {blood}/{EXTRACTOR_CAPACITY} mB")),
             0xFF00_A0A0,
         ));
+    }
+
+    /// One server tick of a stack the player carries: a stack of more than one extractor is
+    /// a save from before the item was unstackable (or a `/item replace … 2`), and is
+    /// resolved **before** anything can drain it — the first extractor keeps the whole
+    /// stored amount, the others are empty and handed back to the player, so no item and no
+    /// blood is lost and none is duplicated.
+    ///
+    /// A single extractor is the normal case and costs one count check.
+    fn inventory_tick(&self, host: &mut dyn ServerHost, event: &mut InventoryTickEvent<'_>) {
+        if event.stack.count() <= 1 {
+            return;
+        }
+        // The slot numbers `ItemPlace::PlayerSlot` (and so `player_set_inventory_slot`)
+        // take, from `Inventory.tick`'s own numbers.
+        let Some(slot) = inventory_slot(event.slot) else {
+            return;
+        };
+        let Some(player) = host.players().acting_player() else {
+            return;
+        };
+        let Some((kept, extras)) = split_extractor_stack(event.stack) else {
+            return;
+        };
+        // The kept extractor goes back into the slot first: a refused write has changed
+        // nothing, so the stack and its blood are still there.
+        if player.set_inventory_slot(host, slot, Some(kept)).is_err() {
+            return;
+        }
+        // A live player whose slot just took the write accepts these as `/give` does; an
+        // overflow is dropped at their feet rather than lost.
+        for extra in extras {
+            let _ = player.give_stack(host, extra);
+        }
     }
 }
 
@@ -294,6 +336,23 @@ fn fill_for(host: &mut dyn ServerHost, player: PlayerRef, health: f32) {
         if stack.item().id(host) != EXTRACTOR {
             continue;
         }
+        // A stack from before the item was unstackable is resolved first, so the kill's
+        // blood lands in a single extractor of the same slot instead of on all of them.
+        let stack = match split_extractor_stack(&stack) {
+            Some((kept, extras)) => {
+                if player
+                    .set_inventory_slot(host, slot, Some(kept.clone()))
+                    .is_err()
+                {
+                    continue;
+                }
+                for extra in extras {
+                    let _ = player.give_stack(host, extra);
+                }
+                kept
+            }
+            None => stack,
+        };
         let held = extractor_blood(&stack);
         let (now, left) = fill_extractor(held, pool);
         if now == held {
@@ -839,9 +898,46 @@ fn write_damage(stack: &mut ItemStack, damage: u32) {
 }
 
 /// The item `id` as a fresh stack of one, for an anvil step that changes the item.
-fn item_stack(host: &dyn Host, id: &str) -> Option<ItemStack> {
-    let identifier = Identifier::parse(id).ok()?;
-    host.item_key(&identifier).map(ItemStack::of)
+/// The `next` state of `from`'s whole stack: the same count and the same component patch,
+/// so a custom name (or any other component) an anvil carried travels with it. `None` when
+/// the new item is unknown to the game or the patch is not representable on it.
+pub(crate) fn anvil_stack(host: &dyn Host, next: &str, from: &ItemStack) -> Option<ItemStack> {
+    let identifier = Identifier::parse(next).ok()?;
+    let mut whole = ItemStack::of(host.item_key(&identifier)?);
+    if let Some(patch) = from.components() {
+        whole.set_components(patch.as_nbt().clone()).ok()?;
+    }
+    whole.set_count(from.count()).ok()?;
+    Some(whole)
+}
+
+/// A stack of more than one extractor, resolved into single extractors: the first keeps the
+/// whole stored amount ([`crate::runtime::legacy_extractors`]), the rest are empty, and every
+/// other component (a custom name) travels on each item as a vanilla split copies it. `None`
+/// for a single extractor, which is already a container.
+pub(crate) fn split_extractor_stack(stack: &ItemStack) -> Option<(ItemStack, Vec<ItemStack>)> {
+    let amounts = legacy_extractors(stack.count(), extractor_blood(stack))?;
+    let mut items = amounts.into_iter().map(|amount| {
+        let mut one = stack.clone();
+        if one.set_count(1).is_err() {
+            return None;
+        }
+        Some(with_extractor_blood(&one, amount))
+    });
+    let kept = items.next()??;
+    let extras: Vec<ItemStack> = items.collect::<Option<_>>()?;
+    Some((kept, extras))
+}
+
+/// The `player_set_inventory_slot` number for `inventory_tick`'s slot: 0..=35 as they are,
+/// the armour's 100..=103 as 36..=39 and the off hand's -106 as 40.
+fn inventory_slot(slot: i32) -> Option<u32> {
+    match slot {
+        0..=35 => u32::try_from(slot).ok(),
+        100..=103 => u32::try_from(slot - 64).ok(),
+        -106 => Some(40),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------

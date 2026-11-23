@@ -130,6 +130,19 @@
 # ticks at tier 1), which is also what proves the recipe's keys resolve to items this package
 # registers.
 #
+# Slice 10 (0.2.10) — the three review findings:
+#  D2 a stack of two chipped anvils (a legal vanilla stack, custom-named) in a Blood Chest:
+#     125 mB leaves it untouched, 250 mB turns **both** into anvils for 2 x 125 mB with the
+#     custom name kept (0.2.7/0.2.8 replaced the stack with one anvil and dropped the rest);
+#  D3 a damaged, enchanted pickaxe is repaired and keeps its enchantment and its one item;
+#  E2 a legacy stack of two Blood Extractors — written into the save by the 0.2.9 package
+#     (`legacy_leg`: its item had no `max_stack_size`, so one stack holds the amount once) — is
+#     resolved before any drain: two single extractors, the first keeping the whole 4,000 mB and
+#     the second 0, and a crouching click on a 3,500 mB stain fills only the first (stain 2,500,
+#     held 5,000, the other still 0);
+#  Y2 the Colossal Blood Chest does the same anvil step as D2 (two anvils for 250 mB, name
+#     kept; 125 mB leaves the stack alone).
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
@@ -150,8 +163,9 @@
 #
 # SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
 # SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's,
-# SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour and
-# SELFTEST=purifier flips AG's curse-gone assertion (each
+# SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour,
+# SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=anvil flips D2's anvil count and
+# SELFTEST=extractor flips E2's split (each
 # must FAIL), proving the scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
@@ -176,6 +190,11 @@ GAME=${GAME:-}
 CONTROL_GAME=${CONTROL_GAME:-}
 # The launcher's export of the previous package (0.2.3): the bow-kill counterfactual.
 OLD_GAME=${OLD_GAME:-${GAME:+$(dirname "$GAME")/../evilcraft-0.2.3/horizon-client}}
+# The launcher's export of the previous package (0.2.9): it had no `max_stack_size`, so it
+# writes the legacy stack of two extractors this package has to resolve. Kept beside the 0.2.10
+# export (`cp -al evilcraft evilcraft-0.2.9` before a rebuild), like the 0.2.3 one.
+LEGACY_GAME=${LEGACY_GAME:-${GAME:+$(dirname "$GAME")/../evilcraft-0.2.9/horizon-client}}
+LEGACY=${LEGACY:-$([ "${CONTROL:-0}" = 1 ] && echo 0 || echo 1)}
 RES=${RES:-${HORIZON_RES:-/home/adlf/Desktop/horizon/.local/horizon-client/26.3}}
 SOCK=${SOCK:-/tmp/opencode/evilcraft-e2e.sock}
 SELFTEST=${SELFTEST:-0}
@@ -869,6 +888,39 @@ old_leg() {
     sleep 1
 }
 
+# The previous package (0.2.9): a save made before the extractor was unstackable (its item
+# declared no `max_stack_size`), so it holds one stack of **two** extractors with the amount
+# stored once — the state review finding 2 is about. The main launch continues this same
+# world, so its first player tick resolves the stack (E2 asserts that).
+legacy_leg() {
+    echo "== the previous package (0.2.9): a save with one stack of two Blood Extractors =="
+    [ -x "$LEGACY_GAME" ] || fail "LEGACY_GAME is not a game: '$LEGACY_GAME'"
+    launch "$WORLD" "$LEGACY_GAME"
+    # hotbar.0 holds a dirt block so the resolved stack's extra item cannot take the selected
+    # slot (the stain E2 places from hotbar.0 must not overwrite the extractor's twin).
+    ctl command "clear @s" >/dev/null
+    ctl command "item replace entity @s hotbar.0 with minecraft:dirt 1" >/dev/null
+    ctl wait 4 >/dev/null
+    ctl command "item replace entity @s hotbar.7 with $EXTRACTOR 2" >/dev/null \
+        || fail "0.2.9 refused a stack of two extractors, so this leg cannot build the legacy save"
+    ctl wait 6 >/dev/null
+    ctl select 8 >/dev/null
+    ctl wait 4 >/dev/null
+    say "evilcraft held 4000"
+    ctl wait 12 >/dev/null
+    local slots count
+    slots=$(ctl inventory | jq --arg i "$EXTRACTOR" '[.hotbar[], .main[] | select(.item == $i)] | length')
+    count=$(ctl inventory | jq --arg i "$EXTRACTOR" '.counts[$i] // 0')
+    [ "$slots" = 1 ] || fail "0.2.9 wrote $slots extractor slot(s), expected the one stack"
+    [ "$count" = 2 ] || fail "0.2.9 wrote $count extractor(s), expected the stack of 2"
+    held_blood "the 0.2.9 stack"
+    [ "$HELD_BLOOD" = 4000 ] || fail "the 0.2.9 stack holds $HELD_BLOOD mB, expected 4,000"
+    echo "  0.2.9 save: one stack of 2 extractors carrying 4,000 mB once" >&2
+    ctl save >/dev/null 2>&1 || true
+    ctl quit >/dev/null 2>&1 || true
+    sleep 1
+}
+
 echo "== launch (The End arena, content + native bundle) =="
 if [ "$CONTROL" = 1 ]; then
     # The control: the whole scenario on the same Nightly **without** the package, where
@@ -878,6 +930,9 @@ if [ "$CONTROL" = 1 ]; then
 fi
 if [ "$OLD" = 1 ]; then
     old_leg
+fi
+if [ "$LEGACY" = 1 ]; then
+    legacy_leg
 fi
 launch
 arena
@@ -967,6 +1022,142 @@ info "$SX" 101 0
 [ "${SLOT1_ITEM:-}" = "minecraft:anvil" ] || fail "the chipped anvil became ${SLOT1_ITEM:-nothing}, expected minecraft:anvil"
 [ "$TANK" = 0 ] || fail "the anvil step left $TANK mB, expected 125 - 125 = 0"
 echo "  chipped_anvil -> anvil, tank 125 -> 0 (one 125 mB step)"
+
+echo "== D2: a stack of broken anvils is repaired whole, one price each (review finding 1) =="
+# `AnvilRepairAction.repair` answers `new ItemStack(anvil)`, so upstream — and 0.2.7/0.2.8 —
+# replaced a stack of N chipped anvils with **one** anvil and dropped its components. The port
+# keeps the stack: N anvils for N x 125 mB, the custom name carried over, and a tank that
+# cannot pay for all N leaves the stack alone. Anvils stack to 64 in vanilla, so this is a
+# legal stack a player really has.
+say "evilcraft blood $SX 101 0 0"
+ctl wait 12 >/dev/null
+ctl command "item replace entity @s hotbar.0 with minecraft:chipped_anvil[minecraft:custom_name='\"Two anvils\"'] 2" >/dev/null
+ctl wait 8 >/dev/null
+open_menu "$SX" 101 0 11
+put_in_slot 302 minecraft:chipped_anvil
+ctl close >/dev/null 2>&1 || true
+ctl wait 10 >/dev/null
+info "$SX" 101 0
+[ "${SLOT2_ITEM:-}" = "minecraft:chipped_anvil" ] || fail "slot 2 holds ${SLOT2_ITEM:-nothing}, expected the anvil stack"
+say "evilcraft blood $SX 101 0 125"
+ctl wait 20 >/dev/null
+info "$SX" 101 0
+saved_item "$SX" 101 0 2
+case "$SAVED_ITEM" in
+    *"count: 2"*chipped_anvil*)
+        echo "  125 mB: the stack of two chipped anvils is untouched" >&2 ;;
+    *) fail "125 mB changed the anvil stack: '$SAVED_ITEM'" ;;
+esac
+[ "$TANK" = 125 ] || fail "the untouched stack left $TANK mB, expected the 125 the tank held"
+say "evilcraft blood $SX 101 0 250"
+ctl wait 20 >/dev/null
+info "$SX" 101 0
+saved_item "$SX" 101 0 2
+ANVIL_COUNT=2
+if [ "$SELFTEST" = anvil ]; then
+    echo "(selftest=anvil: asserting the stack was replaced by one anvil)"
+    ANVIL_COUNT=1
+fi
+case "$SAVED_ITEM" in
+    *"count: $ANVIL_COUNT"*)
+        echo "  two anvils for 250 mB: count $ANVIL_COUNT" >&2 ;;
+    *) fail "the repaired stack holds $SAVED_ITEM, expected count $ANVIL_COUNT" ;;
+esac
+case "$SAVED_ITEM" in
+    *'id: "minecraft:anvil"'*) ;;
+    *) fail "the stack is not minecraft:anvil: '$SAVED_ITEM'" ;;
+esac
+case "$SAVED_ITEM" in
+    *custom_name*Two\ anvils*) echo "  the custom name travelled with both anvils" >&2 ;;
+    *) fail "the repaired anvils lost their custom name: '$SAVED_ITEM'" ;;
+esac
+[ "$TANK" = 0 ] || fail "two anvils cost $((250 - TANK)) mB, expected 2 x 125 = 250 (tank $TANK)"
+
+echo "== D3: a damaged enchanted pickaxe is repaired, and keeps its enchantment =="
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe[minecraft:enchantments={\"minecraft:sharpness\":3}] 1" >/dev/null
+ctl wait 8 >/dev/null
+open_menu "$SX" 101 0 11
+put_in_slot 303 minecraft:diamond_pickaxe
+ctl close >/dev/null 2>&1 || true
+ctl wait 6 >/dev/null
+say "evilcraft damage $SX 101 0 3 250"
+say "evilcraft blood $SX 101 0 1000"
+ctl wait 12 >/dev/null
+info "$SX" 101 0
+D3_BEFORE=$SLOT3_DAMAGE
+[ "${SLOT3_ITEM:-}" = "minecraft:diamond_pickaxe" ] || fail "slot 3 holds ${SLOT3_ITEM:-nothing}"
+ctl wait 40 >/dev/null
+info "$SX" 101 0
+[ "${SLOT3_ITEM:-}" = "minecraft:diamond_pickaxe" ] \
+    || fail "the pickaxe left slot 3 ($SLOT3_ITEM)"
+[ "$SLOT3_DAMAGE" -lt "$D3_BEFORE" ] \
+    || fail "the pickaxe was not repaired (damage $D3_BEFORE -> $SLOT3_DAMAGE)"
+saved_item "$SX" 101 0 3
+case "$SAVED_ITEM" in
+    *"count: 1"*diamond_pickaxe*)
+        echo "  one pickaxe, repaired from damage $D3_BEFORE to $SLOT3_DAMAGE" >&2 ;;
+    *) fail "the repaired pickaxe's saved stack is '$SAVED_ITEM'" ;;
+esac
+case "$SAVED_ITEM" in
+    *minecraft:enchantments*sharpness*)
+        echo "  the enchantment survived the repair" >&2 ;;
+    *) fail "the repair dropped the pickaxe's enchantment: '$SAVED_ITEM'" ;;
+esac
+# Park the repaired pickaxe: a whole item is not repairable, so it cannot spend the tank
+# phase F measures between the kill's readout and the container slot's drain.
+say "evilcraft damage $SX 101 0 3 0"
+ctl wait 8 >/dev/null
+
+echo "== E2: a legacy stack of two extractors is split before any drain (review finding 2) =="
+# The extractor is unstackable now (`max_stack_size = 1`), but a save made before that fix —
+# written by the 0.2.9 package in `legacy_leg` — holds one stack of N with the amount stored
+# **once**. The rule: the first extractor keeps the whole amount, the rest are empty and handed
+# back, so both the blood and the item count are conserved. A crouching click then fills one
+# extractor and cannot write onto the other.
+EX2=$((X0 + 4))
+EZ2=4
+LEGACY_SLOTS=$(ctl inventory | jq --arg i "$EXTRACTOR" '[.hotbar[], .main[] | select(.item == $i)] | length')
+LEGACY_ITEMS=$(ctl inventory | jq --arg i "$EXTRACTOR" '.counts[$i] // 0')
+if [ "$SELFTEST" = extractor ]; then
+    echo "(selftest=extractor: asserting the legacy stack was not split)"
+    LEGACY_SLOTS=1
+fi
+[ "$LEGACY_SLOTS" = 2 ] \
+    || fail "the legacy stack reads as $LEGACY_SLOTS extractor slot(s), expected the split's 2 (inventory: $(ctl inventory | jq -c '.hotbar'))"
+[ "$LEGACY_ITEMS" = 2 ] \
+    || fail "the inventory holds $LEGACY_ITEMS extractor item(s), expected the 2 the stack had"
+echo "  the 0.2.9 stack of two resolved into $LEGACY_SLOTS single extractors ($LEGACY_ITEMS items)" >&2
+ctl select 8 >/dev/null
+ctl wait 4 >/dev/null
+held_blood "the first extractor"
+[ "$HELD_BLOOD" = 4000 ] \
+    || fail "the first extractor holds $HELD_BLOOD mB, expected the stack's whole 4,000"
+ctl select 2 >/dev/null
+ctl wait 4 >/dev/null
+held_blood "the second extractor"
+[ "$HELD_BLOOD" = 0 ] \
+    || fail "the second extractor holds $HELD_BLOOD mB, expected the split's 0"
+# The stain goes down after the split (place_stain writes hotbar.0, which holds a dirt block,
+# so neither extractor is disturbed), then the crouching click with the filled one.
+say "evilcraft blood $EX2 101 $EZ2 0"
+ctl wait 8 >/dev/null
+place_stain "$EX2" 101 "$EZ2"
+say "evilcraft blood $EX2 101 $EZ2 3500"
+ctl wait 12 >/dev/null
+ctl select 8 >/dev/null
+ctl wait 4 >/dev/null
+crouch_click "$EX2" 101 "$EZ2" .03 "$STAIN"
+stain "$EX2" 101 "$EZ2"
+[ "$TANK" = 2500 ] || fail "the stain holds $TANK mB after the draw, expected 3500 - 1000 = 2500"
+held_blood "the poured extractor"
+[ "$HELD_BLOOD" = 5000 ] || fail "the held extractor holds $HELD_BLOOD mB, expected its 5,000"
+ctl select 2 >/dev/null
+ctl wait 4 >/dev/null
+held_blood "the other extractor"
+[ "$HELD_BLOOD" = 0 ] \
+    || fail "the drain wrote $HELD_BLOOD mB onto the second extractor, expected 0"
+echo "  the crouching click drew 1,000 mB into one extractor (4,000 -> 5,000); the other still holds 0 mB"
+ctl command "execute in minecraft:the_end run setblock $EX2 101 $EZ2 minecraft:air" >/dev/null
 
 echo "== E: a player kill fills a carried Blood Extractor =="
 ctl command "clear @s" >/dev/null
@@ -1725,6 +1916,47 @@ CLOSED_CURED=$((CLOSED_DAMAGE - SLOT0_DAMAGE))
     || fail "the resumed repair spent $((CLOSED_TANK - TANK)) mB for $CLOSED_CURED points"
 echo "  the plank back: formed=true, damage $CLOSED_DAMAGE -> $SLOT0_DAMAGE in 40 ticks again"
 
+echo "== Y2: the Colossal Blood Chest repairs a whole anvil stack, one price each =="
+# The same rule as D2, on the machine the review names: a stack of two chipped anvils (a legal
+# vanilla stack) becomes two anvils for 2 x 125 mB, the custom name carried, and a tank that
+# cannot pay for both leaves the stack untouched.
+load_slot "$COLX" "$COLY" "$COLZ" 0 minecraft:diamond_pickaxe
+load_slot "$COLX" "$COLY" "$COLZ" 45 empty
+say "evilcraft blood $COLX $COLY $COLZ 125"
+ctl wait 10 >/dev/null
+ctl command "item replace entity @s hotbar.0 with minecraft:chipped_anvil[minecraft:custom_name='\"Colossal pair\"'] 2" >/dev/null
+ctl wait 8 >/dev/null
+open_menu "$COLX" "$COLY" "$COLZ" 50
+put_in_slot 301 minecraft:chipped_anvil
+ctl close >/dev/null 2>&1 || true
+ctl wait 20 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "${SLOT1_ITEM:-}" = "minecraft:chipped_anvil" ] || fail "slot 1 holds ${SLOT1_ITEM:-nothing}, expected the anvil stack"
+saved_item "$COLX" "$COLY" "$COLZ" 1
+case "$SAVED_ITEM" in
+    *"count: 2"*chipped_anvil*) echo "  125 mB: the colossal's stack of two is untouched" >&2 ;;
+    *) fail "125 mB changed the colossal's anvil stack: '$SAVED_ITEM'" ;;
+esac
+[ "$TANK" = 125 ] || fail "the untouched stack left $TANK mB, expected the 125 the tank held"
+say "evilcraft blood $COLX $COLY $COLZ 250"
+ctl wait 20 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+saved_item "$COLX" "$COLY" "$COLZ" 1
+case "$SAVED_ITEM" in
+    *"count: 2"*) echo "  the colossal converted both anvils (count 2)" >&2 ;;
+    *) fail "the colossal's repaired stack holds '$SAVED_ITEM', expected count 2" ;;
+esac
+case "$SAVED_ITEM" in
+    *'id: "minecraft:anvil"'*) ;;
+    *) fail "the colossal's stack is not minecraft:anvil: '$SAVED_ITEM'" ;;
+esac
+case "$SAVED_ITEM" in
+    *custom_name*Colossal\ pair*) echo "  the custom name travelled with both anvils" >&2 ;;
+    *) fail "the colossal's repaired anvils lost their custom name: '$SAVED_ITEM'" ;;
+esac
+[ "$TANK" = 0 ] || fail "the colossal spent $((250 - TANK)) mB on two anvils, expected 250 (tank $TANK)"
+load_slot "$COLX" "$COLY" "$COLZ" 1 empty
+
 echo "== AA: the same pickaxe in a plain Blood Chest repairs at the same rate (the differential) =="
 # The Colossal Blood Chest's own numbers are the Blood Chest's: `baseMBPerDamage` (5) and
 # `ticksPerDamage` (2). The same damage-250 pickaxe, the same 1,000 mB and the same 40 ticks
@@ -2100,4 +2332,4 @@ saved_tank "$PUX" "$PUY" "$PUZ"
 [ "$SAVED_MB" = "$PURIFIER_TANK" ] || fail "the purifier's saved tank is $SAVED_MB mB"
 echo "  extractor 5000 -> $HELD_BLOOD mB, purifier tank $PURIFIED_TANK -> $TANK mB (the 1,000 mB room, the rest kept)"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), and the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks"
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), and the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks"

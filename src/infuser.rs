@@ -261,17 +261,25 @@ impl BlockEntityPart for Infuser {
         }
         let mut tank = crate::blood::read_tank(&entity.nbt);
         // The container slot empties a blood container into the tank, upstream's
-        // `EmptyFluidContainerInTankTickAction` (the same action the chest runs).
+        // `EmptyFluidContainerInTankTickAction` (the same action the chest runs). A stack
+        // from before the item was unstackable is left for the player to take out and for
+        // their inventory to resolve.
         if let Some(container) = entity.items[crate::runtime::INFUSER_CONTAINER_SLOT].take() {
             let extractor = container.item().id(host) == crate::runtime::EXTRACTOR;
-            let (filled, keeps) =
-                crate::runtime::drain_container(tank, crate::blood::extractor_blood(&container));
-            tank = filled;
-            entity.items[crate::runtime::INFUSER_CONTAINER_SLOT] = Some(if extractor {
-                crate::blood::with_extractor_blood(&container, keeps)
+            if extractor && !crate::runtime::one_extractor(container.count()) {
+                entity.items[crate::runtime::INFUSER_CONTAINER_SLOT] = Some(container);
             } else {
-                container
-            });
+                let (filled, keeps) = crate::runtime::drain_container(
+                    tank,
+                    crate::blood::extractor_blood(&container),
+                );
+                tank = filled;
+                entity.items[crate::runtime::INFUSER_CONTAINER_SLOT] = Some(if extractor {
+                    crate::blood::with_extractor_blood(&container, keeps)
+                } else {
+                    container
+                });
+            }
         }
         // The machine's tier is the promise in its upgrade slots (`ItemPromise`).
         let mut tier = 0;

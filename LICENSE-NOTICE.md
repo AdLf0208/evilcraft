@@ -19,22 +19,35 @@ same:
 
 The README is the narrower, more specific grant and it is the one that covers the **carried
 textures** — the Blood Extractor's, the Promise's, the Blood Stain's, the Blood Chest's, the
-Blood Infuser's, the Colossal Blood Chest's, the Reinforced Undead Planks' and the Dark Tank's
-(`assets/evilcraft/textures/{item,block}/*.png`, the block files including the chest's
-`blood_chest.png`, the upstream file of `colossal_blood_chest.png`). This port therefore
-distributes under **CC BY 4.0**, which requires attribution, and keeps the MIT grant on record
-as the build metadata's alternative.
+Blood Infuser's, the Colossal Blood Chest's, the Reinforced Undead Planks', the Dark Tank's, the
+**Blook's** and the **Purifier's** (`assets/evilcraft/textures/{item,block}/*.png`, the block
+files including the chest's `blood_chest.png`, the upstream file of `colossal_blood_chest.png`).
+This port therefore distributes under **CC BY 4.0**, which requires attribution, and keeps the
+MIT grant on record as the build metadata's alternative.
 
 ### Attribution (CC BY 4.0 §3(a))
 
 - **Creator:** rubensworks (aka kroeser), for EvilCraft.
 - **Source:** <https://github.com/CyclopsMC/EvilCraft>, tag `1.21.1-1.2.100`.
 - **Changes:** this is an independent, clean-room **Rust** rewrite for Horizon (Minecraft Java
-  26.3). No Java code is translated. The carried textures are the upstream images, unchanged
-  except for the chest's block texture being renamed to `blood_chest.png`; the Blood Stain's
-  blockstate, its three block models and the `minecraft:replaceable` tag it adds are also the
-  jar's own files, byte for byte. Every other model, blockstate, item definition, loot table,
-  recipe, menu and language file is written by this port.
+  26.3). No Java code is translated. These files are the upstream jar's own bytes, carried
+  unchanged except where a path is named:
+  - the textures listed in the grant paragraph above — every one the jar's image, unchanged;
+    the chest's block texture is the jar's `colossal_blood_chest.png` under the name
+    `blood_chest.png`, and the Blook's and the Purifier's three arrived with 0.2.9;
+  - **the ten Blood Infuser recipes** the package carries, byte for byte: the nine
+    `convenience/` files — `minecraft_blaze_rod.json`, `minecraft_creeper_head.json`,
+    `minecraft_grass_block.json`, `minecraft_nether_wart.json`, `minecraft_netherrack.json`,
+    `minecraft_red_mushroom.json`, `minecraft_soul_sand.json`, `minecraft_spider_eye.json`,
+    `minecraft_zombie_head.json` — and `base/blook.json` (0.2.9). The **only** change is the
+    directory: upstream's `data/evilcraft/recipe/blood_infuser/convenience/<file>` is this
+    package's `data/evilcraft/recipe/blood_infuser/<file>` (the recipe's `type`,
+    `input_item`, `input_fluid`, `output_item`, `duration`, `xp` and `tier` are unedited);
+  - the Blood Stain's blockstate and its three block models, the Purifier's blockstate, the
+    Dark Tank's item model, and the `minecraft:replaceable` block tag (`data/minecraft/tags/
+    block/replaceable.json`), all byte for byte.
+  Every other blockstate, model, item definition, loot table, menu, tag and language file is
+  written by this port.
 - **Licence of this port:** CC BY 4.0 (© 2026 the Horizon port authors), with the original
   copyright above retained. The MIT grant remains available for the code under the upstream
   build metadata (`LICENSE-MIT`).

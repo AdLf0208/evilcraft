@@ -25,8 +25,8 @@ use mod_api::{
 
 use crate::runtime::{
     COLOSSAL, COLOSSAL_CONTAINER_SLOT, COLOSSAL_INVENTORY, COLOSSAL_SLOT_COUNT, COLOSSAL_SLOTS,
-    TANK_CAPACITY, anvil_step, can_hold, colossal_formed, drain_container, repair, repair_due,
-    structure_cell,
+    TANK_CAPACITY, anvil_stack_step, can_hold, colossal_formed, drain_container, repair,
+    repair_due, structure_cell,
 };
 
 /// The block entity type: a bare name, so the mod's namespace qualifies it.
@@ -76,16 +76,24 @@ impl BlockEntityPart for Colossal {
         let mut tank = crate::blood::read_tank(&entity.nbt);
         // The container slot empties a blood container into the tank, as upstream's
         // `EmptyFluidContainerInTankTickAction` does; that action does not ask `canWork`,
-        // so blood goes in even while the cube is open.
+        // so blood goes in even while the cube is open. A stack from before the item was
+        // unstackable stays where it is: one amount cannot be debited for several items
+        // without losing or duplicating blood, so the player takes it out and the
+        // inventory resolves it (`crate::blood::Extractor`'s `inventory_tick`).
         if let Some(container) = entity.items[COLOSSAL_CONTAINER_SLOT].take() {
             let extractor = container.item().id(host) == crate::runtime::EXTRACTOR;
-            let (filled, keeps) = drain_container(tank, crate::blood::extractor_blood(&container));
-            tank = filled;
-            entity.items[COLOSSAL_CONTAINER_SLOT] = Some(if extractor {
-                crate::blood::with_extractor_blood(&container, keeps)
+            if extractor && !crate::runtime::one_extractor(container.count()) {
+                entity.items[COLOSSAL_CONTAINER_SLOT] = Some(container);
             } else {
-                container
-            });
+                let (filled, keeps) =
+                    drain_container(tank, crate::blood::extractor_blood(&container));
+                tank = filled;
+                entity.items[COLOSSAL_CONTAINER_SLOT] = Some(if extractor {
+                    crate::blood::with_extractor_blood(&container, keeps)
+                } else {
+                    container
+                });
+            }
         }
         let ticks = crate::blood::read_int(&entity.nbt, TICKS)
             .unwrap_or(0)
@@ -101,14 +109,15 @@ impl BlockEntityPart for Colossal {
                 let item = stack.item().id(host);
                 if can_hold(&item, damage) {
                     // The chest's own numbers: `baseMBPerDamage` (5) a point, and an anvil
-                    // step for the action's 25× multiplier (125 mB).
+                    // step for the action's 25× multiplier (125 mB each).
                     if damage > 0 {
                         if let Some((left, tank_left)) = repair(damage, tank) {
                             write_damage(&mut stack, u32::try_from(left).unwrap_or(0));
                             tank = tank_left;
                         }
-                    } else if let Some((next, tank_left)) = anvil_step(&item, tank)
-                        && let Some(whole) = item_stack(host, next)
+                    } else if let Some((next, tank_left)) =
+                        anvil_stack_step(&item, stack.count(), tank)
+                        && let Some(whole) = crate::blood::anvil_stack(host, next, &stack)
                     {
                         stack = whole;
                         tank = tank_left;
@@ -227,12 +236,6 @@ fn write_damage(stack: &mut mod_api::ItemStack, damage: u32) {
     } else {
         stack.set_damage(damage);
     }
-}
-
-/// The item `id` as a fresh stack of one, for an anvil step that changes the item.
-fn item_stack(host: &dyn Host, id: &str) -> Option<mod_api::ItemStack> {
-    let identifier = mod_api::Identifier::parse(id).ok()?;
-    host.item_key(&identifier).map(mod_api::ItemStack::of)
 }
 
 // ---------------------------------------------------------------------------

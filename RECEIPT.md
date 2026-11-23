@@ -1,11 +1,11 @@
-# Package receipt — evilcraft 0.2.9
+# Package receipt — evilcraft 0.2.10
 
 | field | value |
 |---|---|
-| version | `0.2.9` |
+| version | `0.2.10` |
 | file | `evilcraft.hmod` |
-| bytes | 221,406 |
-| sha256 | `e1266a7ffd974cbd488430c397e4d97248ac354bce596b63fd27c85c95c1568f` |
+| bytes | 225,856 |
+| sha256 | `dbbdf5d865689c45d98ab4151fefe00fad04f29f64ac7f669922a9c5364013ef` |
 | source | this tag — the tree here is the source that produced the archive |
 | game | 26.3 |
 | horizon | `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` |
