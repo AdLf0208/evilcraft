@@ -16,6 +16,7 @@
 //! components, and a broken machine's tank travels on its own item as
 //! `minecraft:block_entity_data` ([`tank`]).
 pub mod blood;
+pub mod colossal;
 pub mod infuser;
 pub mod runtime;
 pub mod stain;
@@ -88,6 +89,21 @@ impl Hooks for Mod {
         r.register_raw_recipe_serializer(runtime::INFUSION_TYPE, runtime::INFUSION_TYPE);
         // The infuser's own item, the second machine whose drop carries its tank.
         tank::Machine::Infuser.register(r);
+
+        // The Colossal Blood Chest: a block entity with 45 repair slots, a container slot,
+        // four upgrade slots and a tank, whose 3×3×3 shell the tick scans every tick. Its
+        // plank is a plain content block, and the controller's drop carries its tank like
+        // the other two machines' (`copy_tank_data`).
+        let colossal = r.block_key(runtime::COLOSSAL);
+        let kind = r
+            .block_entity_type(colossal::COLOSSAL_ENTITY)
+            .blocks(&[colossal::COLOSSAL_BLOCK])
+            .build();
+        r.block_entity_part(&kind, colossal::Colossal)
+            .expect("evilcraft declares the colossal blood chest's own block entity type");
+        r.block_container(&colossal, colossal::container());
+        r.block_fluids(&colossal, colossal::tanks());
+        tank::Machine::Colossal.register(r);
     }
 
     /// A broken Blood Chest or Blood Infuser drops its own item carrying the blood in its

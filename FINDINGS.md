@@ -109,6 +109,10 @@ ingredients — `blood_infusion_core`, `dark_spike`, `dark_gem` — are not in t
 slice), the BER chest model, the blood stains, the colossal chest, every other
 machine.
 
+> **Later slices (0.2.2–0.2.7)** carried the Blood Infuser, the tank on a broken machine's
+> drop, projectile kills, the Blood Stain, the fall-death stain and the **Colossal Blood
+> Chest**; `notes.md` is the current record of what is carried and what is still a gap.
+
 ## Deviations recorded while reading
 
 - Blood is a **mod fluid id** (`evilcraft:blood`) in the chest tank; Horizon has no

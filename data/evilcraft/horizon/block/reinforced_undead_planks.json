@@ -1,0 +1,11 @@
+{
+  "item": true,
+  "properties": {
+    "explosion_resistance": 5.0,
+    "hardness": 5.0,
+    "map_color": 13,
+    "requires_tool": false,
+    "sounds": "minecraft:oak_planks"
+  },
+  "template": "minecraft:stone"
+}

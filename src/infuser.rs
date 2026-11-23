@@ -498,16 +498,17 @@ pub fn load(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Comm
         crate::blood::say(host, usage.to_owned());
         return;
     };
-    let Some(entity) = entity_at(host, source, pos) else {
+    let Some((entity, noun, slots)) = crate::blood::machine_at(host, source, pos) else {
         return;
     };
     let slot = u32::try_from(slot.max(0)).unwrap_or(0);
-    if slot as usize >= INFUSER_SLOTS {
+    if slot as usize >= slots {
         crate::blood::say(host, format!("{pos:?} has no slot {slot}."));
         return;
     }
-    // `empty` clears the slot, so a scenario can take a product out between recipes.
-    let stack = if item == "empty" {
+    // `empty` clears the slot, so a scenario can take a product out between recipes. The
+    // dispatcher namespaces a bare word, so the argument arrives as `minecraft:empty`.
+    let stack = if item == "empty" || item == "minecraft:empty" {
         None
     } else {
         let Some(key) = Identifier::parse(item)
@@ -531,7 +532,7 @@ pub fn load(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Comm
     crate::blood::say(
         host,
         if written {
-            format!("Blood Infuser at {pos:?}: {item} in slot {slot}.")
+            format!("{noun} at {pos:?}: {item} in slot {slot}.")
         } else {
             format!("{pos:?} kept its slot {slot}.")
         },

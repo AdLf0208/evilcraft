@@ -1,5 +1,8 @@
 {
   "block.evilcraft.blood_chest": "Blood Chest",
+  "block.evilcraft.colossal_blood_chest": "Colossal Blood Chest",
+  "block.evilcraft.colossal_blood_chest.info": "An industry-sized Blood Chest: a hollow 3x3x3 shell of Reinforced Undead Planks with exactly one Colossal Blood Chest in its wall.",
+  "block.evilcraft.reinforced_undead_planks": "Reinforced Undead Planks",
   "block.evilcraft.blood_infuser": "Blood Infuser",
   "block.evilcraft.blood_stain": "Blood Stain",
   "block.evilcraft.blood_stain.info": "A splash of Blood created when an entity falls to death.",

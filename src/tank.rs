@@ -20,7 +20,7 @@ use mod_api::{
     OnBlockPlacedByEvent, Registrar, ServerHost, Tag,
 };
 
-use crate::runtime::{CHEST, INFUSER, TANK_CAPACITY, carried_tank, restored_tank};
+use crate::runtime::{CHEST, COLOSSAL, INFUSER, TANK_CAPACITY, carried_tank, restored_tank};
 
 /// The vanilla component that moves a block entity's saved data on its item
 /// (`BlockEntity.applyComponentsFromItemStack`, `TypedEntityData.loadInto`).
@@ -30,19 +30,21 @@ const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
 // The two machines
 // ---------------------------------------------------------------------------
 
-/// One of the two machines whose own item carries its tank: `evilcraft:blood_chest` and
-/// `evilcraft:blood_infuser`.
+/// One of the three machines whose own item carries its tank: `evilcraft:blood_chest`,
+/// `evilcraft:blood_infuser` and `evilcraft:colossal_blood_chest`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Machine {
     /// The Blood Chest.
     Chest,
     /// The Blood Infuser.
     Infuser,
+    /// The Colossal Blood Chest.
+    Colossal,
 }
 
 impl Machine {
     /// The machines, in registration order.
-    pub const ALL: [Self; 2] = [Self::Chest, Self::Infuser];
+    pub const ALL: [Self; 3] = [Self::Chest, Self::Infuser, Self::Colossal];
 
     /// The block. Its id is also the block entity type's registry id, which is the `id`
     /// `minecraft:block_entity_data` tags a payload with, and the id of the item it drops.
@@ -51,6 +53,7 @@ impl Machine {
         match self {
             Self::Chest => CHEST,
             Self::Infuser => INFUSER,
+            Self::Colossal => COLOSSAL,
         }
     }
 
@@ -58,10 +61,11 @@ impl Machine {
         match self {
             Self::Chest => 0,
             Self::Infuser => 1,
+            Self::Colossal => 2,
         }
     }
 
-    /// The machine a block id names, if it is one of the two.
+    /// The machine a block id names, if it is one of the three.
     #[must_use]
     fn of_block(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|machine| machine.id() == id)
@@ -82,9 +86,12 @@ impl Machine {
     }
 }
 
-/// The two machines' items, resolved once at registration.
-static ITEM: [std::sync::OnceLock<ItemKey>; 2] =
-    [std::sync::OnceLock::new(), std::sync::OnceLock::new()];
+/// The machines' items, resolved once at registration.
+static ITEM: [std::sync::OnceLock<ItemKey>; 3] = [
+    std::sync::OnceLock::new(),
+    std::sync::OnceLock::new(),
+    std::sync::OnceLock::new(),
+];
 
 // ---------------------------------------------------------------------------
 // The payload
@@ -281,6 +288,7 @@ mod tests {
     fn each_machine_names_its_own_block_and_type() {
         assert_eq!(Machine::of_block(CHEST), Some(Machine::Chest));
         assert_eq!(Machine::of_block(INFUSER), Some(Machine::Infuser));
+        assert_eq!(Machine::of_block(COLOSSAL), Some(Machine::Colossal));
         assert_eq!(Machine::of_block("evilcraft:blood_extractor"), None);
         assert_eq!(Machine::of_block("minecraft:furnace"), None);
     }

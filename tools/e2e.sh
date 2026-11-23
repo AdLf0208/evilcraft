@@ -83,11 +83,27 @@
 #  X  a second fall death on the stain V left: **800 mB** in the same cell, and no second
 #     stain above it (the counterfactual: a top-up, not a new block).
 #
+# Slice 7 — the Colossal Blood Chest (`BlockColossalBloodChest`, upstream's hollow cube):
+#  Y  a hollow 3x3x3 shell of `evilcraft:reinforced_undead_planks` with exactly one
+#     `evilcraft:colossal_blood_chest` in its wall, the middle cell air, forms one machine:
+#     `/evilcraft colossal` reads `formed=true`, a 10,000 mB tank and its 46 slots (45 repair
+#     slots and the container slot); a damage-250 diamond pickaxe in slot 0 with 1,000 mB
+#     repairs one damage point every two ticks for 5 mB (20 points and 100 mB in 40 ticks),
+#     and keeps going until the tank is empty (200 points for the 1,000 mB);
+#  Z  the counterfactual: one shell block removed reads `formed=false` and the same pickaxe
+#     and tank repair nothing over the same 40 ticks; the container slot still empties a
+#     filled extractor into the tank while the shell is open (the menu lists all 50 slots),
+#     and putting the plank back forms the cube again and the repair resumes;
+#  AA the differential: the *same* damage-250 pickaxe, the same 1,000 mB and the same 40
+#     ticks repair at the same rate in a plain `evilcraft:blood_chest`;
+#  AB the controller breaks into itself in survival with an axe and its own item carries the
+#     blood tank (`copy_tank_data` on the third machine), and a plank drops itself.
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
 #
-# The operator gate on `/evilcraft info|infuser` is unit-tested
+# The operator gate on `/evilcraft info|infuser|stain|colossal` is unit-tested
 # (`the_readout_needs_an_operator_and_names_only_this_chest`) and registered at level 2;
 # its in-game leg needs a LAN guest at level 0 (`lan open 0`), because an integrated
 # server refuses `op`/`deop` (HANDOVER §9d trap 6), and that leg belongs to the next
@@ -102,13 +118,16 @@
 # **without** the package, where the chest item never registers and the run must fail.
 #
 # SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
-# SELFTEST=blood flips Q's, SELFTEST=stain flips S's and SELFTEST=fall flips V's (each must
+# SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's and
+# SELFTEST=colossal flips Y's `formed` assertion (each must
 # FAIL), proving the scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
 # in its tank drops an item that carries no payload, which is exactly what a break the listener
 # never hears leaves behind. Phase R is the kill's differential: the same extractor, the same
-# mob and a lethal arrow, whose shooter is a skeleton rather than the player.
+# mob and a lethal arrow, whose shooter is a skeleton rather than the player. Phase Z is the
+# Colossal Blood Chest's counterfactual (one shell block out: no repair) and phase AA its
+# differential (the same pickaxe and tank in a plain Blood Chest repair at the same rate).
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${EC_DEBUG:-}" ] || set -x
@@ -139,6 +158,8 @@ IX=$((X0 + 6))
 CHEST=evilcraft:blood_chest
 INFUSER=evilcraft:blood_infuser
 STAIN=evilcraft:blood_stain
+COLOSSAL=evilcraft:colossal_blood_chest
+PLANKS=evilcraft:reinforced_undead_planks
 EXTRACTOR=evilcraft:blood_extractor
 PROMISE=evilcraft:promise_tier_3
 TANK_CAPACITY=10000
@@ -358,8 +379,32 @@ stain() { # stain X Y Z
     echo "  $STAIN_LINE" >&2
 }
 
+# `/evilcraft colossal X Y Z`: the line, then the parsed fields in FORMED, TANK,
+# CAPACITY, REPAIR, SLOTS, CONTAINER_ITEM, CONTAINER_BLOOD and SLOT<n>_ITEM / SLOT<n>_DAMAGE.
+colossal() { # colossal X Y Z
+    # Wait for the reply itself: the chat is read newest first and the readout ends in
+    # `t=<game time>`, so a new one can never equal the previous one.
+    local prev line i
+    prev=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Colossal Blood Chest \[' || true)
+    say "evilcraft colossal $1 $2 $3"
+    line=$prev
+    for i in $(seq 1 40); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Colossal Blood Chest \[' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] \
+        || fail "no /evilcraft colossal reply for $1 $2 $3 (last: '${line}')"
+    COLOSSAL_LINE=$line
+    # A readout replaces the previous one: a stack that has left slot 0 must not still read
+    # as there because an earlier eval named it (`info()`'s own guard).
+    unset "${!SLOT@}" 2>/dev/null || true
+    eval "$(python3 "$PORT/tools/parse_colossal.py" "$COLOSSAL_LINE")"
+    [ "${ok:-0}" = 1 ] || fail "the colossal line did not parse: $COLOSSAL_LINE"
+    echo "  $COLOSSAL_LINE" >&2
+}
+
 # Place a stain from its own item on the arena floor below X Y Z.
-#
 # `place_chest` is the chests' helper; a stain is 1px high, and `ctl place` reports the
 # block two ticks after its click, so a click the client dropped (or the server applied a
 # tick late) reads as "the block did not change". This helper measures that instead of
@@ -495,12 +540,12 @@ infuse() { # input output count cost ticks
 # Break a machine in survival and keep what the break reported: `BREAK` is `ctl break`'s
 # reply (`block`, `drops`, `picked_up`, `items_left_on_ground`), which is the server's own
 # count of what the loot tables rolled.
-break_survival() { # x y z block
-    local x=$1 y=$2 z=$3 block=$4 held name
+break_survival() { # x y z block [tool]
+    local x=$1 y=$2 z=$3 block=$4 tool=${5:-minecraft:diamond_pickaxe} held name
     ctl command "execute in minecraft:the_end run tp @s $((x - 3)).5 101 $((z + 1)).5" >/dev/null
     ctl wait 6 >/dev/null
     held=$(ctl inventory | jq -r '.held.item // ""')
-    [ "$held" = "minecraft:diamond_pickaxe" ] || fail "the pickaxe is not in hand: '$held'"
+    [ "$held" = "$tool" ] || fail "the $tool is not in hand: '$held'"
     BREAK=$(ctl break "$x" "$y" "$z") || fail "$block did not break"
     ctl wait 10 >/dev/null
     name=$(block_name "$x" "$y" "$z")
@@ -1117,6 +1162,11 @@ ctl command "execute in minecraft:the_end run summon minecraft:zombie 206.5 101 
 ctl wait 6 >/dev/null
 ZOMBIES=$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')
 [ "$ZOMBIES" = 1 ] || fail "the arena holds $ZOMBIES zombies, expected 1: $(ctl entities 20 | jq -c '.entities[0:3]')"
+# An AI zombie is the target because a frozen one takes no projectile damage, and an AI zombie
+# wanders: its cell is pinned just before the arrow is sent, so the straight flight along z=10.5
+# meets it (measured once on 2026-11-23: a free zombie had walked out of the arrow's line).
+ctl command "execute in minecraft:the_end run tp @e[type=minecraft:zombie,limit=1] 206.5 101 10.5" >/dev/null
+ctl wait 2 >/dev/null
 # The arrow is the skeleton's: its own UUID is in the arrow's saved `Owner`, read back
 # before it is sent at the zombie, so the leg is about a mob's arrow and not about an
 # ownerless one.
@@ -1126,6 +1176,8 @@ ctl wait 4 >/dev/null
 arrow_line
 grep -qF "Owner: $SKEL_UUID" <<<"$ARROW_LINE" \
     || fail "the arrow is not the skeleton's: expected Owner $SKEL_UUID, read '$ARROW_LINE'"
+ctl command "execute in minecraft:the_end run tp @e[type=minecraft:zombie,limit=1] 206.5 101 10.5" >/dev/null
+ctl wait 2 >/dev/null
 ctl command "data merge entity @e[type=minecraft:arrow,limit=1] {Motion:[-2.0,0.0,0.0]}" >/dev/null \
     || fail "the skeleton's arrow does not fly"
 for _ in $(seq 1 20); do
@@ -1365,4 +1417,245 @@ SWORD_CELL=$(block_name "$FX" 101 "$FZ")
     || fail "a sword kill left '$SWORD_CELL' where the fall left a stain; only a fall death may stain"
 echo "  the same cell after a sword kill is $SWORD_CELL (no stain)"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, and the same zombie killed with a sword leaves the cell empty"
+echo "== Y: a hollow 3x3x3 shell forms one Colossal Blood Chest, which repairs one point a two ticks =="
+# Upstream's multiblock is not 27 controllers: `HollowCubeDetector` + `ExactSizeValidator(2,2,2)`
+# + `ExactBlockCountValidator(1)` ask for a hollow 3x3x3 cube whose wall is reinforced undead
+# planks and **exactly one** colossal blood chest, the middle cell air. The player is still in
+# survival after N; the cube is built with the game's own `/fill` and `/setblock`.
+COLX=$((X0 - 2))
+COLY=101
+COLZ=-10
+COL_C=$((COLX + 1))     # the cube's middle (air)
+COL_MY=$((COLY + 1))
+COL_MZ=$((COLZ + 1))
+COL_FAR=$((COLX + 2))   # the corner the counterfactual removes
+COL_FARY=$((COLY + 2))
+COL_FARZ=$((COLZ + 2))
+# `break_survival` stands three cells west of what it breaks, which is outside the arena's
+# own floor (x 198..208): extend it so the player does not fall into the void.
+ctl command "execute in minecraft:the_end run fill $((COLX - 4)) 100 -14 $((X0 + 8)) 100 14 minecraft:stone" >/dev/null
+ctl wait 6 >/dev/null
+ctl command "execute in minecraft:the_end run kill @e[type=!player,distance=..8]" >/dev/null 2>&1 || true
+ctl command "execute in minecraft:the_end run fill $COLX $COLY $COLZ $COL_FAR $COL_FARY $COL_FARZ $PLANKS" >/dev/null
+ctl wait 6 >/dev/null
+ctl command "execute in minecraft:the_end run setblock $COL_C $COL_MY $COL_MZ minecraft:air" >/dev/null
+ctl command "execute in minecraft:the_end run setblock $COLX $COLY $COLZ $COLOSSAL" >/dev/null
+ctl wait 12 >/dev/null
+[ "$(block_name "$COLX" "$COLY" "$COLZ")" = "$COLOSSAL" ] \
+    || fail "the controller did not place at $COLX,$COLY,$COLZ ('$(block_name "$COLX" "$COLY" "$COLZ")')"
+[ "$(block_name "$COL_FAR" "$COL_FARY" "$COL_FARZ")" = "$PLANKS" ] || fail "the shell's far corner is not a plank"
+[ "$(block_name "$COL_C" "$COL_MY" "$COL_MZ")" = "minecraft:air" ] || fail "the cube's middle is not hollow"
+colossal "$COLX" "$COLY" "$COLZ"
+COLOSSAL_FORMED=$FORMED
+if [ "$SELFTEST" = colossal ]; then
+    echo "(selftest=colossal: asserting the 3x3x3 shell is not formed)"
+    COLOSSAL_FORMED=false
+fi
+[ "$COLOSSAL_FORMED" = true ] \
+    || fail "the hollow 3x3x3 shell at $COLX,$COLY,$COLZ is not formed (formed=$FORMED)"
+[ "$CAPACITY" = "$TANK_CAPACITY" ] || fail "the colossal chest reports a $CAPACITY mB tank, expected $TANK_CAPACITY"
+[ "$REPAIR" = 45 ] || fail "the machine reports $REPAIR repair slots, expected 45"
+[ "$SLOTS" = 46 ] || fail "the machine reports $SLOTS slots, expected 46 (45 repair + the container)"
+echo "  a hollow 3x3x3 of $PLANKS around one controller: formed=true, $REPAIR repair slots, $SLOTS slots"
+# The brief's number: 1,000 mB and a damage-250 diamond pickaxe in the first repair slot.
+say "evilcraft blood $COLX $COLY $COLZ 1000"
+ctl wait 10 >/dev/null
+say "evilcraft load $COLX $COLY $COLZ 0 minecraft:diamond_pickaxe"
+ctl wait 10 >/dev/null
+say "evilcraft damage $COLX $COLY $COLZ 0 250"
+ctl wait 12 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "${SLOT0_ITEM:-}" = "minecraft:diamond_pickaxe" ] || fail "slot 0 holds ${SLOT0_ITEM:-nothing}, expected the pickaxe"
+# The machine repairs from the moment it is formed, so the readout that follows the harness
+# command already shows the pickaxe a little past 250 and the tank a little under 1,000; the
+# *rate* is measured between two readouts below.
+[ "$SLOT0_DAMAGE" -le 250 ] || fail "the harness did not damage the pickaxe (reads $SLOT0_DAMAGE)"
+[ "$SLOT0_DAMAGE" -ge 200 ] || fail "the pickaxe is at damage $SLOT0_DAMAGE, so the harness set nothing near 250"
+[ "$TANK" -le 1000 ] || fail "the harness set the tank to $TANK mB, more than the 1,000 it asked for"
+[ "$TANK" -ge 900 ] || fail "the tank is at $TANK mB right after being filled to 1,000"
+COL_DAMAGE_BEFORE=$SLOT0_DAMAGE
+COL_TANK_BEFORE=$TANK
+COL_TICKS_START=$TIME
+ctl wait 40 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+COL_TICKS=$((TIME - COL_TICKS_START))
+COL_CURED=$((COL_DAMAGE_BEFORE - SLOT0_DAMAGE))
+COL_SPENT=$((COL_TANK_BEFORE - TANK))
+[ "$COL_TICKS" -gt 0 ] || fail "no ticks passed between the two colossal reads"
+[ "$COL_CURED" -gt 0 ] || fail "the formed machine repaired nothing in $COL_TICKS ticks (damage $SLOT0_DAMAGE)"
+[ "$COL_CURED" -le $((COL_TICKS / TICKS_PER_DAMAGE + 1)) ] \
+    || fail "$COL_CURED damage points in $COL_TICKS ticks is faster than one a $TICKS_PER_DAMAGE ticks"
+[ "$COL_CURED" -ge $((COL_TICKS / TICKS_PER_DAMAGE - 1)) ] \
+    || fail "$COL_CURED damage points in $COL_TICKS ticks is slower than one a $TICKS_PER_DAMAGE ticks"
+[ "$COL_SPENT" -eq $((MB_PER_DAMAGE * COL_CURED)) ] \
+    || fail "$COL_CURED damage points cost $COL_SPENT mB, expected $((MB_PER_DAMAGE * COL_CURED)) (5 mB a point)"
+echo "  $COL_TICKS ticks: damage $COL_DAMAGE_BEFORE -> $SLOT0_DAMAGE ($COL_CURED points), tank $COL_TANK_BEFORE -> $TANK (-$COL_SPENT mB)"
+# And it keeps repairing until the tank is empty: 1,000 mB is 200 points, 400 ticks.
+say "evilcraft damage $COLX $COLY $COLZ 0 250"
+say "evilcraft blood $COLX $COLY $COLZ 1000"
+ctl wait 12 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+LONG_START=$SLOT0_DAMAGE
+LONG_TANK=$TANK
+ctl wait 460 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "$TANK" = 0 ] || fail "460 ticks left $TANK mB in the tank, expected the 1,000 mB to be spent"
+# Every point costs exactly 5 mB, so the tank read the fill at pays exactly `tank / 5` more
+# points: the damage fell by that many, whatever the readout's own latency had already spent.
+LONG_EXPECTED=$((LONG_START - LONG_TANK / MB_PER_DAMAGE))
+[ "${SLOT0_DAMAGE:-}" = "$LONG_EXPECTED" ] \
+    || fail "the tank's $LONG_TANK mB repaired the pickaxe from $LONG_START to ${SLOT0_DAMAGE:-nothing}, expected $LONG_EXPECTED"
+ctl wait 40 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "$TANK" = 0 ] || fail "an empty tank gained $TANK mB"
+[ "${SLOT0_DAMAGE:-}" = "$LONG_EXPECTED" ] \
+    || fail "an empty tank repaired the pickaxe further (damage ${SLOT0_DAMAGE:-nothing})"
+echo "  the tank emptied: damage $LONG_START -> ${SLOT0_DAMAGE:-?} for $LONG_TANK mB ($((LONG_TANK / MB_PER_DAMAGE)) points at $MB_PER_DAMAGE mB), and 40 more ticks repair nothing"
+COLOSSAL_RATE=$COL_CURED
+
+echo "== Z: open the shell and the machine stops (the counterfactual) =="
+# The same tank and the same pickaxe with one plank of the shell gone: `canWork()` asks
+# `getSize()` for the exact size, and `BulkRepairItemTickAction.canTick` asks `canWork` first.
+ctl command "execute in minecraft:the_end run setblock $COL_FAR $COL_FARY $COL_FARZ minecraft:air" >/dev/null
+ctl wait 10 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "$FORMED" = false ] \
+    || fail "one shell block removed still reads formed=$FORMED, so the counterfactual proves nothing"
+say "evilcraft damage $COLX $COLY $COLZ 0 250"
+say "evilcraft blood $COLX $COLY $COLZ 1000"
+ctl wait 12 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+OPEN_DAMAGE=$SLOT0_DAMAGE
+OPEN_TANK=$TANK
+OPEN_TICKS_START=$TIME
+ctl wait 40 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+OPEN_TICKS=$((TIME - OPEN_TICKS_START))
+[ "$OPEN_TICKS" -gt 0 ] || fail "no ticks passed between the two open-shell reads"
+[ "$SLOT0_DAMAGE" = "$OPEN_DAMAGE" ] \
+    || fail "an open shell repaired the pickaxe ($OPEN_DAMAGE -> $SLOT0_DAMAGE over $OPEN_TICKS ticks)"
+[ "$TANK" = "$OPEN_TANK" ] || fail "an open shell spent blood ($OPEN_TANK -> $TANK)"
+echo "  one shell block out: formed=false, damage $SLOT0_DAMAGE and tank $TANK unchanged over $OPEN_TICKS ticks"
+# The container slot does not ask `canWork` (upstream's `EmptyInTankTickAction.canTick`), so a
+# filled extractor still empties into the tank while the cube is open — and the menu lists all
+# fifty slots, which is the parity row for the machine's GUI.
+ctl command "clear @s" >/dev/null
+ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 9 >/dev/null
+ctl wait 2 >/dev/null
+say "evilcraft held 1000"
+ctl wait 12 >/dev/null
+say "evilcraft blood $COLX $COLY $COLZ 0"
+ctl wait 10 >/dev/null
+open_menu "$COLX" "$COLY" "$COLZ" 50
+put_in_slot 345 "$EXTRACTOR"
+ctl close >/dev/null 2>&1 || true
+ctl wait 20 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "$TANK" = 1000 ] || fail "the open shell's container slot moved $TANK mB into the tank, expected 1,000"
+[ "${CONTAINER_ITEM:-}" = "$EXTRACTOR" ] || fail "the container slot holds ${CONTAINER_ITEM:-nothing}, expected the extractor"
+[ "${CONTAINER_BLOOD:-}" = 0 ] || fail "the extractor still holds ${CONTAINER_BLOOD} mB"
+echo "  the menu lists 50 slots, and an extractor of 1,000 mB empties into the open machine's tank ($TANK mB, container $CONTAINER_BLOOD mB)"
+# The plank back: the cube forms again and the repair resumes from the same tank.
+ctl command "execute in minecraft:the_end run setblock $COL_FAR $COL_FARY $COL_FARZ $PLANKS" >/dev/null
+ctl wait 10 >/dev/null
+say "evilcraft damage $COLX $COLY $COLZ 0 250"
+ctl wait 12 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "$FORMED" = true ] || fail "putting the plank back did not form the cube again (formed=$FORMED)"
+CLOSED_DAMAGE=$SLOT0_DAMAGE
+CLOSED_TANK=$TANK
+ctl wait 40 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+CLOSED_CURED=$((CLOSED_DAMAGE - SLOT0_DAMAGE))
+[ "$CLOSED_CURED" -gt 0 ] || fail "the repair did not resume once the shell was whole (damage $SLOT0_DAMAGE)"
+[ $((CLOSED_TANK - TANK)) -eq $((MB_PER_DAMAGE * CLOSED_CURED)) ] \
+    || fail "the resumed repair spent $((CLOSED_TANK - TANK)) mB for $CLOSED_CURED points"
+echo "  the plank back: formed=true, damage $CLOSED_DAMAGE -> $SLOT0_DAMAGE in 40 ticks again"
+
+echo "== AA: the same pickaxe in a plain Blood Chest repairs at the same rate (the differential) =="
+# The Colossal Blood Chest's own numbers are the Blood Chest's: `baseMBPerDamage` (5) and
+# `ticksPerDamage` (2). The same damage-250 pickaxe, the same 1,000 mB and the same 40 ticks
+# in a plain chest must cure the same number of points for the same blood.
+DCHX=$((X0 - 2))
+DCHZ=$((COLZ - 2))
+ctl command "execute in minecraft:the_end run setblock $DCHX 101 $DCHZ $CHEST" >/dev/null
+ctl wait 10 >/dev/null
+say "evilcraft blood $DCHX 101 $DCHZ 1000"
+ctl wait 10 >/dev/null
+say "evilcraft load $DCHX 101 $DCHZ 0 minecraft:diamond_pickaxe"
+ctl wait 10 >/dev/null
+say "evilcraft damage $DCHX 101 $DCHZ 0 250"
+ctl wait 12 >/dev/null
+info "$DCHX" 101 "$DCHZ"
+[ "${SLOT0_ITEM:-}" = "minecraft:diamond_pickaxe" ] || fail "the plain chest's slot 0 holds ${SLOT0_ITEM:-nothing}"
+PLAIN_DAMAGE=$SLOT0_DAMAGE
+PLAIN_TANK=$TANK
+PLAIN_TICKS_START=$TIME
+ctl wait 40 >/dev/null
+info "$DCHX" 101 "$DCHZ"
+PLAIN_TICKS=$((TIME - PLAIN_TICKS_START))
+PLAIN_CURED=$((PLAIN_DAMAGE - SLOT0_DAMAGE))
+PLAIN_SPENT=$((PLAIN_TANK - TANK))
+[ "$PLAIN_TICKS" -gt 0 ] || fail "no ticks passed between the two plain-chest reads"
+[ "$PLAIN_SPENT" -eq $((MB_PER_DAMAGE * PLAIN_CURED)) ] \
+    || fail "the plain chest spent $PLAIN_SPENT mB for $PLAIN_CURED points"
+# The same rule as the colossal chest's: one point a two ticks and 5 mB a point, measured over
+# this leg's own window (the readout's latency is in both numbers, so the bound scales).
+[ "$PLAIN_CURED" -le $((PLAIN_TICKS / TICKS_PER_DAMAGE + 1)) ] \
+    || fail "the plain chest cured $PLAIN_CURED points in $PLAIN_TICKS ticks, faster than one a $TICKS_PER_DAMAGE"
+[ "$PLAIN_CURED" -ge $((PLAIN_TICKS / TICKS_PER_DAMAGE - 1)) ] \
+    || fail "the plain chest cured $PLAIN_CURED points in $PLAIN_TICKS ticks, slower than one a $TICKS_PER_DAMAGE"
+echo "  plain chest: $PLAIN_TICKS ticks, damage $PLAIN_DAMAGE -> $SLOT0_DAMAGE ($PLAIN_CURED points), tank -$PLAIN_SPENT mB — one point a $TICKS_PER_DAMAGE ticks for $MB_PER_DAMAGE mB, as the colossal chest's $COLOSSAL_RATE"
+
+echo "== AB: the controller breaks into itself carrying its tank, and a plank drops itself =="
+# `copy_tank_data` runs on the colossal chest's loot table too: the three machines' drops all
+# carry their tank through `block_drops` + `minecraft:block_entity_data`. A plank's table is the
+# plain one, and both blocks are in the jar's `minecraft:mineable/axe` tag (an axe, not a
+# pickaxe, is their tool).
+ctl command "gamemode survival @s" >/dev/null
+for _ in $(seq 1 10); do
+    ctl wait 4 >/dev/null
+    ctl messages 6 | jq -r '.chat[]' | grep -qi 'survival mode' && break
+done
+ctl command "clear @s" >/dev/null 2>&1 || true
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_axe 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+# No damaged stack in the machine before the tank is set: a formed machine would spend some of
+# the 4,000 mB repairing it while the break is prepared, and the drop must carry exactly what
+# the tank held.
+say "evilcraft load $COLX $COLY $COLZ 0 empty"
+ctl wait 10 >/dev/null
+say "evilcraft blood $COLX $COLY $COLZ 4000"
+ctl wait 12 >/dev/null
+colossal "$COLX" "$COLY" "$COLZ"
+[ "$TANK" = 4000 ] || fail "the harness left the tank at $TANK mB, expected 4,000"
+[ -z "${SLOT0_ITEM:-}" ] \
+    || fail "the machine still holds ${SLOT0_ITEM} in slot 0, so it would spend the tank repairing it before the break"
+# A plank of the shell the player can see: the west wall. The far corner is the counterfactual's
+# cell, but it sits behind the cube's own wall from outside, and `ctl break` refuses what it
+# cannot see (measured 2026-11-23: "did not break").
+break_survival "$COLX" "$COLY" "$((COLZ + 2))" "$PLANKS" minecraft:diamond_axe
+echo "  a plank of the shell drops itself with an axe"
+break_survival "$COLX" "$COLY" "$COLZ" "$COLOSSAL" minecraft:diamond_axe
+# The player cannot stand in the cube's middle after the controller is gone (its cell is a
+# plank), so the drop is collected rather than walked onto, and the hand is read the way the
+# server holds it (`SelectedItem`), as `pick_hold` does.
+ctl collect 8 >/dev/null 2>&1 || true
+ctl wait 12 >/dev/null
+AB_SLOT=$(ctl inventory | jq -r --arg i "$COLOSSAL" '[.hotbar[] | select(.item == $i) | .slot] | .[0] // ""')
+[ -n "$AB_SLOT" ] || fail "the dropped controller was not picked up: $(ctl inventory | jq -c '.hotbar')"
+ctl select $((AB_SLOT + 1)) >/dev/null
+ctl wait 6 >/dev/null
+selected_item_line "the dropped $COLOSSAL"
+eval "$(python3 "$PORT/tools/parse_components.py" "$HELD_COMPONENTS" "$COLOSSAL")"
+AB_CARRIED=${carried:-none}
+[ "${ok:-0}" = 1 ] || fail "the dropped colossal chest carries no block entity data: '$HELD_COMPONENTS'"
+[ "$AB_CARRIED" = 4000 ] || fail "the dropped colossal chest carries $AB_CARRIED mB, expected 4000"
+[ "$fluid" = "evilcraft:blood" ] || fail "the dropped colossal chest carries '$fluid', expected evilcraft:blood"
+echo "  the controller broke into itself carrying $AB_CARRIED mB of $fluid"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, and the controller breaks into an item carrying its 4,000 mB with an axe"

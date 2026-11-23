@@ -412,6 +412,125 @@ pub fn fall_stain(
     })
 }
 
+// ---------------------------------------------------------------------------
+// Slice 7: the Colossal Blood Chest (`BlockColossalBloodChest`)
+// ---------------------------------------------------------------------------
+
+/// `BlockColossalBloodChest`: the controller of the 3×3×3 structure.
+pub const COLOSSAL: &str = "evilcraft:colossal_blood_chest";
+/// `BlockReinforcedUndeadPlank`: the block the rest of the shell is built from.
+pub const REINFORCED_PLANKS: &str = "evilcraft:reinforced_undead_planks";
+/// `ContainerColossalBloodChest.CHEST_INVENTORY_ROWS × …_COLUMNS` = 5 × 9.
+pub const COLOSSAL_SLOTS: usize = 45;
+/// `BlockEntityColossalBloodChest.SLOT_CONTAINER`: the fluid-container slot.
+pub const COLOSSAL_CONTAINER_SLOT: usize = COLOSSAL_SLOTS;
+/// `BlockEntityColossalBloodChest.SLOTS`: the repair slots and the container slot.
+pub const COLOSSAL_SLOT_COUNT: usize = COLOSSAL_SLOTS + 1;
+/// The machine's whole inventory: its own slots and `BlockEntityWorking.INVENTORY_SIZE_UPGRADES`.
+pub const COLOSSAL_INVENTORY: usize = COLOSSAL_SLOT_COUNT + UPGRADE_SLOTS;
+/// `BlockEntityColossalBloodChest.exactSizeValidator`'s `ExactSizeValidator(new Vec3i(2, 2, 2))`:
+/// the inner size of a hollow cube, so the cube a controller sits in is 3×3×3.
+pub const COLOSSAL_SIZE: i32 = 3;
+/// The shell's cells: the cube's 27 cells less the one air cell in its middle.
+pub const COLOSSAL_SHELL: usize = 26;
+
+/// What one cell of the 3×3×3 cube holds, as `CubeDetector` reads it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Shell {
+    /// The controller itself (`evilcraft:colossal_blood_chest`).
+    Chest,
+    /// A reinforced undead plank.
+    Planks,
+    /// Air: allowed in the cube's middle, nowhere else.
+    Air,
+    /// Anything else.
+    Other,
+}
+
+/// The cell a block id is. Upstream's detector allows exactly two blocks in the cube's
+/// shell (`getCubeDetector`) and calls everything else invalid; its hollow rule lets only
+/// air into the middle.
+#[must_use]
+pub fn structure_cell(id: &str) -> Shell {
+    match id {
+        COLOSSAL => Shell::Chest,
+        REINFORCED_PLANKS => Shell::Planks,
+        "minecraft:air" | "minecraft:cave_air" | "minecraft:void_air" => Shell::Air,
+        _ => Shell::Other,
+    }
+}
+
+/// The minimum corner and the cell count of the material `controller` sits in, found by
+/// walking the structure's own blocks out from it — upstream's `HollowCubeDetector`,
+/// which flood-fills the allowed blocks rather than guessing a corner at each axis.
+///
+/// The walk stops as soon as the region is bigger than a 3×3×3 cube could be, so a wall
+/// of planks costs 28 cells and no more: `ExactSizeValidator`'s rule is that the region
+/// must be exactly one cube, never a piece of a larger mass.
+#[must_use]
+fn colossal_region(
+    controller: [i32; 3],
+    cell: &impl Fn([i32; 3]) -> Shell,
+) -> Option<([i32; 3], usize)> {
+    let material = |pos: [i32; 3]| matches!(cell(pos), Shell::Chest | Shell::Planks);
+    if !material(controller) {
+        return None;
+    }
+    let mut seen: Vec<[i32; 3]> = Vec::with_capacity(COLOSSAL_SHELL + 1);
+    let mut stack = vec![controller];
+    let mut min = controller;
+    let mut max = controller;
+    while let Some(pos) = stack.pop() {
+        if seen.contains(&pos) || !material(pos) {
+            continue;
+        }
+        seen.push(pos);
+        if seen.len() > COLOSSAL_SHELL {
+            return None;
+        }
+        for axis in 0..3 {
+            min[axis] = min[axis].min(pos[axis]);
+            max[axis] = max[axis].max(pos[axis]);
+        }
+        for axis in 0..3 {
+            for step in [-1, 1] {
+                let mut next = pos;
+                next[axis] += step;
+                stack.push(next);
+            }
+        }
+    }
+    Some((min, seen.len()))
+}
+
+/// The structure a controller at `controller` forms: its minimum corner when the blocks
+/// reachable from it are exactly the 26 cells of a 3×3×3 cube's shell, the cube's middle is
+/// air (`HollowCubeDetector` + `ExactSizeValidator(2, 2, 2)`), and the controller is the
+/// shell's **only** `colossal_blood_chest` (`ExactBlockCountValidator(1)`).
+/// `None` for every other arrangement.
+#[must_use]
+pub fn colossal_formed(controller: [i32; 3], cell: impl Fn([i32; 3]) -> Shell) -> Option<[i32; 3]> {
+    let (anchor, cells) = colossal_region(controller, &cell)?;
+    if cells != COLOSSAL_SHELL {
+        return None;
+    }
+    let mut chests = 0;
+    for x in 0..COLOSSAL_SIZE {
+        for y in 0..COLOSSAL_SIZE {
+            for z in 0..COLOSSAL_SIZE {
+                let pos = [anchor[0] + x, anchor[1] + y, anchor[2] + z];
+                match ((x, y, z) == (1, 1, 1), cell(pos)) {
+                    (true, Shell::Air) => {}
+                    (false, Shell::Chest) => chests += 1,
+                    (false, Shell::Planks) => {}
+                    _ => return None,
+                }
+            }
+        }
+    }
+    (chests == 1).then_some(anchor)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +820,211 @@ mod tests {
         assert_eq!(stain_blood(0.0), 0);
         assert_eq!(stain_blood(-5.0), 0);
         assert_eq!(fall_stain([10, 101, 20], 0.0, None, Cell::Free), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 7: the Colossal Blood Chest's structure
+    // -----------------------------------------------------------------------
+
+    /// A 3×3×3 cube at `anchor`: 25 reinforced planks, air in the middle, `controller` a chest.
+    fn cube(
+        anchor: [i32; 3],
+        controller: [i32; 3],
+    ) -> std::collections::BTreeMap<[i32; 3], &'static str> {
+        let mut cells = std::collections::BTreeMap::new();
+        for x in 0..COLOSSAL_SIZE {
+            for y in 0..COLOSSAL_SIZE {
+                for z in 0..COLOSSAL_SIZE {
+                    cells.insert(
+                        [anchor[0] + x, anchor[1] + y, anchor[2] + z],
+                        REINFORCED_PLANKS,
+                    );
+                }
+            }
+        }
+        cells.insert(
+            [anchor[0] + 1, anchor[1] + 1, anchor[2] + 1],
+            "minecraft:air",
+        );
+        cells.insert(controller, COLOSSAL);
+        cells
+    }
+
+    /// The cube's cells as a reader; anything the map does not hold is stone, as the world
+    /// outside a structure is.
+    fn reader<'a>(
+        cells: &'a std::collections::BTreeMap<[i32; 3], &'static str>,
+    ) -> impl Fn([i32; 3]) -> Shell + 'a {
+        move |pos| structure_cell(cells.get(&pos).copied().unwrap_or("minecraft:stone"))
+    }
+
+    /// One tick of the machine's repair loop over the repair slots, when it is formed:
+    /// `(damage, tank)` after `ticks` ticks.
+    fn repair_ticks(formed: bool, mut damage: i32, mut tank: i32, ticks: u32) -> (i32, i32) {
+        for tick in 0..ticks {
+            if formed
+                && repair_due(tick)
+                && let Some((left, tank_left)) = repair(damage, tank)
+            {
+                damage = left;
+                tank = tank_left;
+            }
+        }
+        (damage, tank)
+    }
+
+    #[test]
+    fn the_structure_is_a_three_cube_with_one_air_cell() {
+        assert_eq!(COLOSSAL_SIZE, 3);
+        assert_eq!(COLOSSAL_SHELL, 26);
+        assert_eq!(
+            COLOSSAL_SHELL as i32,
+            COLOSSAL_SIZE * COLOSSAL_SIZE * COLOSSAL_SIZE - 1
+        );
+        assert_eq!(COLOSSAL, "evilcraft:colossal_blood_chest");
+        assert_eq!(REINFORCED_PLANKS, "evilcraft:reinforced_undead_planks");
+    }
+
+    #[test]
+    fn every_shell_cell_of_the_cube_can_be_the_controller() {
+        let anchor = [10, 101, -20];
+        for x in 0..COLOSSAL_SIZE {
+            for y in 0..COLOSSAL_SIZE {
+                for z in 0..COLOSSAL_SIZE {
+                    if (x, y, z) == (1, 1, 1) {
+                        continue;
+                    }
+                    let controller = [anchor[0] + x, anchor[1] + y, anchor[2] + z];
+                    let cells = cube(anchor, controller);
+                    assert_eq!(
+                        colossal_formed(controller, reader(&cells)),
+                        Some(anchor),
+                        "a chest at {controller:?} is a shell cell of the cube"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_missing_shell_block_breaks_the_structure() {
+        let anchor = [10, 101, -20];
+        let controller = [10, 101, -20];
+        let mut cells = cube(anchor, controller);
+        // One plank of the shell removed: the counterfactual the in-game leg performs.
+        for corner in [[10, 103, -20], [11, 101, -18]] {
+            let removed = cells.remove(&corner).expect("the shell held the plank");
+            assert_eq!(
+                colossal_formed(controller, reader(&cells)),
+                None,
+                "the shell is open at {corner:?}"
+            );
+            cells.insert(corner, removed);
+            assert_eq!(
+                colossal_formed(controller, reader(&cells)),
+                Some(anchor),
+                "putting the plank back at {corner:?} forms the cube again"
+            );
+        }
+    }
+
+    #[test]
+    fn a_filled_middle_breaks_the_structure() {
+        let anchor = [10, 101, -20];
+        let controller = [10, 101, -20];
+        let mut cells = cube(anchor, controller);
+        cells.insert([11, 102, -19], REINFORCED_PLANKS);
+        assert_eq!(
+            colossal_formed(controller, reader(&cells)),
+            None,
+            "the hollow cube's middle is not hollow"
+        );
+    }
+
+    #[test]
+    fn a_second_colossal_chest_breaks_the_structure() {
+        // `ExactBlockCountValidator(1)`: exactly one colossal chest in the cube.
+        let anchor = [10, 101, -20];
+        let controller = [10, 101, -20];
+        let mut cells = cube(anchor, controller);
+        cells.insert([12, 103, -18], COLOSSAL);
+        assert_eq!(colossal_formed(controller, reader(&cells)), None);
+    }
+
+    #[test]
+    fn a_chest_in_the_middle_is_no_structure() {
+        // The middle cell must be air: a controller there is not a shell cell at all.
+        let anchor = [10, 101, -20];
+        let middle = [11, 102, -19];
+        let cells = cube(anchor, middle);
+        assert_eq!(colossal_formed(middle, reader(&cells)), None);
+    }
+
+    #[test]
+    fn a_lone_chest_and_a_wall_of_planks_do_not_form() {
+        // A fresh controller in the world: its shell is air, so nothing forms.
+        let mut lone = std::collections::BTreeMap::new();
+        lone.insert([10, 101, -20], COLOSSAL);
+        assert_eq!(colossal_formed([10, 101, -20], reader(&lone)), None);
+        // A solid 5×3×3 mass of planks with a chest in it: the candidate cube's middle is
+        // planks, not air, so the detector refuses it.
+        let mut wall = std::collections::BTreeMap::new();
+        for x in 0..5 {
+            for y in 0..3 {
+                for z in 0..3 {
+                    wall.insert([10 + x, 101 + y, -20 + z], REINFORCED_PLANKS);
+                }
+            }
+        }
+        wall.insert([12, 101, -20], COLOSSAL);
+        assert_eq!(colossal_formed([12, 101, -20], reader(&wall)), None);
+    }
+
+    #[test]
+    fn a_cube_that_is_not_exactly_three_wide_does_not_form() {
+        // A valid cube with one more plank layer beside it: the corner walk stops at the
+        // outer shell, whose middle is planks, so the exact-size rule refuses it.
+        let anchor = [10, 101, -20];
+        let controller = [10, 101, -20];
+        let mut cells = cube(anchor, controller);
+        for y in 0..3 {
+            for z in 0..3 {
+                cells.insert([9, 101 + y, -20 + z], REINFORCED_PLANKS);
+            }
+        }
+        assert_eq!(colossal_formed(controller, reader(&cells)), None);
+    }
+
+    #[test]
+    fn the_machine_has_forty_five_repair_slots_one_container_and_four_upgrades() {
+        assert_eq!(COLOSSAL_SLOTS, 45);
+        assert_eq!(COLOSSAL_CONTAINER_SLOT, 45);
+        assert_eq!(COLOSSAL_SLOT_COUNT, 46);
+        assert_eq!(COLOSSAL_INVENTORY, 50);
+        assert_eq!(TANK_CAPACITY, 10 * BUCKET);
+    }
+
+    #[test]
+    fn a_formed_colossal_repairs_one_point_every_two_ticks_for_five_mb() {
+        // The brief's own assertion, as the machine's loop: 250 damage, 1,000 mB, 40 ticks.
+        assert_eq!(
+            repair_ticks(true, 250, 1_000, 40),
+            (230, 900),
+            "20 points in 40 ticks at 5 mB a point"
+        );
+        // And it keeps going until the tank is empty: 1,000 mB is 200 points, 400 ticks.
+        assert_eq!(repair_ticks(true, 250, 1_000, 400), (50, 0));
+    }
+
+    #[test]
+    fn an_unformed_colossal_repairs_nothing() {
+        // The same tank, the same pickaxe, the same 40 ticks: a shell that is not whole
+        // leaves the item and the blood alone (`BulkRepairItemTickAction.canTick` asks
+        // `canWork()` first).
+        assert_eq!(repair_ticks(false, 250, 1_000, 40), (250, 1_000));
+        // And a formed one with less than one point's blood stops exactly where a point
+        // no longer fits, which is the plain chest's own `repair` rule.
+        assert_eq!(repair_ticks(true, 250, 4, 40), (250, 4));
     }
 
     // -----------------------------------------------------------------------

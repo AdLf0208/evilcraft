@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -1453,6 +1453,302 @@ pickaxe tag are the earlier slices'.)
 | the tank's 5,000 mB cap | **tested (unit + in game)** | `a_fall_never_fills_a_stain_past_its_five_buckets`; every in-game read is against `5000` |
 | a fall with no cell to stain | **tested (unit)** | `a_fall_with_no_cell_to_stain_leaves_the_level_alone` |
 | the `tconstruct:.*` spawn blacklist, `spawnOnBlockEntities`, the vengeance-spirit exclusion | not ported | deviations 3–4 (none of the three is in this port's carried set) |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 7 — the Colossal Blood Chest (`BlockColossalBloodChest`, `BlockEntityColossalBloodChest`) (2026-11-23)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.7**.
+The registry entry, the PR and the ledger stay the orchestrator's.
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap 7, unchanged since (quoted as slice 2's coverage row):
+
+> No blood stain, **colossal chest**, purifier, … — the rest of the jar's machinery (gap 7).
+
+It is the third machine of the blood economy the port already ships, its numbers are the Blood
+Chest's own, and it is a **multiblock** — the family the parity rule names explicitly ("every
+multiblock is built from the mod's own blocks, asserted to form, and one operation run"). The
+assertion is a `formed` bit plus the repair rate, both readable through `/evilcraft colossal`.
+
+**Tier:** `deep` still governs the port; this slice is a `machines`/`deep` family inside it — a
+block entity with 45 repair slots, a 50-slot menu and a screen, a tank, and a structure rule read
+from the world. No entity, renderer or dimension.
+
+### Upstream source read (analysis only, not copied)
+
+<https://github.com/CyclopsMC/EvilCraft>, clone at `ports/_shared/upstream/evilcraft` (tag
+`1.21.1-1.2.100`, commit `aa81220`, read 2026-11-23):
+`block/BlockColossalBloodChest.java`, `block/BlockColossalBloodChestConfig.java`,
+`block/BlockReinforcedUndeadPlank.java`, `blockentity/BlockEntityColossalBloodChest.java`,
+`blockentity/BlockEntityColossalBloodChestConfig.java`,
+`inventory/container/ContainerColossalBloodChest.java` (+`Config`),
+`blockentity/tickaction/bloodchest/BulkRepairItemTickAction.java`,
+`blockentity/tickaction/EmptyFluidContainerInTankTickAction.java`,
+`blockentity/tickaction/EmptyInTankTickAction.java`,
+`core/blockentity/BlockEntityWorking.java`; plus the jar's own
+`assets/evilcraft/{blockstates,models}/…colossal…`, `data/evilcraft/loot_table/blocks/…`,
+`data/minecraft/tags/block/mineable/axe.json` and the lang keys.
+
+### What the artefact says the family is (read, not guessed)
+
+`BlockColossalBloodChest`, `BlockEntityColossalBloodChest`, `BlockReinforcedUndeadPlank`
+(upstream clone at tag `1.21.1-1.2.100`, commit `aa8122019`), plus CyclopsCore's
+`HollowCubeDetector`/`ExactSizeValidator`/`ExactBlockCountValidator` and the jar's own
+`assets/`/`data/` files:
+
+- **Structure:** `HollowCubeDetector` + `AllowedBlock[]` = reinforced undead planks (any count)
+  + **exactly one** `colossal_blood_chest` (`ExactBlockCountValidator(1)`), with
+  `ExactSizeValidator(new Vec3i(2, 2, 2))` → a **3×3×3 outer cube whose 27th cell is air**: 25
+  planks plus one controller on the shell, the middle hollow. The jar's own lang says it too:
+  *"make a **hollow** 3x3x3 structure of Reinforced Undead Planks … exactly one Colossal Blood
+  Chest block somewhere in the structure wall, … not … in the middle of the structure"*.
+  **The brief's "27 controllers in a cube" is not what the mod builds; the artefact wins and
+  this is the shape that ships.**
+- **Machine:** 45 repair slots (`ContainerColossalBloodChest.CHEST_INVENTORY_ROWS 5` ×
+  `COLUMNS 9`), one container slot (`SLOT_CONTAINER`), four upgrade slots
+  (`BlockEntityWorking.INVENTORY_SIZE_UPGRADES`), a 10,000 mB tank (`LIQUID_PER_SLOT`), the
+  Blood Chest's `baseMBPerDamage = 5` and `ticksPerDamage = 2`, and an anvil step of
+  `25 × 5 = 125 mB`. `BulkRepairItemTickAction.canTick` asks `tile.canWork()` first, and
+  `canWork()` is `getSize() == ExactSizeValidator(2,2,2)` — an open shell repairs nothing. The
+  container slot's `EmptyFluidContainerInTankTickAction.canTick` does **not** ask `canWork`, so
+  a filled extractor still empties into the tank while the cube is open.
+- **Block:** `requiresCorrectToolForDrops`, `strength(5.0)`, `SoundType.WOOD`, `noOcclusion`;
+  the plank is `strength(5.0)`, `SoundType.WOOD`, `noOcclusion`, and both are in the jar's
+  `minecraft:mineable/axe` tag. The chest's loot table runs `minecraft:copy_name` +
+  `evilcraft:copy_tank_data`.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Structure rule | `runtime::colossal_formed`: flood-fill of the mod's two blocks out from the controller (`HollowCubeDetector`), the region must be exactly the 26 cells of a 3×3×3 shell, the middle cell air (`ExactSizeValidator(2,2,2)`), and exactly one chest — this one (`ExactBlockCountValidator(1)`) | `getCubeDetector`, the lang |
+| Block | `evilcraft:colossal_blood_chest` (template `minecraft:smithing_table` — a full cube with no state properties whose *class* is a container, see harness fact 1) and `evilcraft:reinforced_undead_planks` (template `minecraft:stone`) | `BlockColossalBloodChestConfig`, `BlockReinforcedUndeadPlankConfig` |
+| Block entity | 50 slots (45 repair, the container slot at 45, four upgrade slots), the tick, the tank | `BlockEntityColossalBloodChest` (`SLOTS_CHEST`, `SLOT_CONTAINER`, `SLOTS`, `LIQUID_PER_SLOT`) |
+| Menu | `evilcraft:colossal_blood_chest_menu` — 50 slots, 2 data slots (tank, capacity) | `ContainerColossalBloodChest` |
+| Repair | the chest's own numbers: one damage point every two ticks for 5 mB, `minecraft:stick` never, a broken anvil 125 mB a step | `BulkRepairItemTickAction`, `BloodChestRepairActionRegistry` |
+| Tank drop | the third `tank::Machine`: a broken controller's own item carries `minecraft:block_entity_data` with the tank, and placing it back clamps it to 10,000 mB | the chest's `copy_tank_data` route (slice 3) |
+| Command | `/evilcraft colossal <pos>` (`formed`, tank, repair-slot count, slots, container, slots' damage); `/evilcraft blood` and `/evilcraft damage|load` now reach it | harness only (upstream has no commands) |
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice7.log` (the eleven tests written; `colossal_formed` stubbed to `None`, the
+rule not implemented). The two that assert a structure *forms* fail; the ones that assert a
+wrong arrangement is refused pass against a stub by construction — they are the boundary a
+*wrong* implementation breaks, and the in-game counterfactual (Z) is their leg:
+
+```
+test result: FAILED. 54 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+---- runtime::tests::a_missing_shell_block_breaks_the_structure stdout ----
+thread '…' panicked at src/runtime.rs:906:13:
+assertion `left == right` failed: putting the plank back at [10, 103, -20] forms the cube again
+  left: None
+ right: Some([10, 101, -20])
+
+---- runtime::tests::every_shell_cell_of_the_cube_can_be_the_controller stdout ----
+thread '…' panicked at src/runtime.rs:882:21:
+assertion `left == right` failed: a chest at [10, 101, -20] is a shell cell of the cube
+  left: None
+ right: Some([10, 101, -20])
+
+test result: FAILED. 54 passed; 2 failed; …
+EXIT:101
+```
+
+**A red run that changed the rule.** The first draft of `colossal_anchor` walked one cell out
+of the controller on each axis (`CubeDetector.navigateToBorder`'s shape) and derived the cube's
+corner from what it found. `every_shell_cell_of_the_cube_can_be_the_controller` proved that
+wrong for a **hollow** cube: a shell cell whose inner neighbour is the middle cell sees *air*
+behind it and is mistaken for the cube's edge, so a controller at a corner next to the hollow
+(e.g. `[11, 102, -18]`) read `None`. The rule became the flood fill `HollowCubeDetector`
+actually is; the red log above is the run against the stub of *that* rule, and the same test
+went green with it.
+
+Green: `sdk-test.log` — **56 passed, 0 failed** (45 before the slice + 11 new: the structure
+constants, every shell cell as the controller, a missing plank, a filled middle, a second
+chest, a chest in the middle, a lone chest/wall, a cube that is not exactly three wide, the
+slot layout, the formed repair rate, the unformed gate). `sdk-clippy.log` — `cargo fmt --check`
+clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 2/56** (`EXIT:101`) | `sdk-test-red-slice7.log` |
+| tests (green) | `cargo test` | **56 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 518 API uses, 16 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **199,156 B**, sha256 `71f78499…b6d9f1`, `CMP-IDENTICAL`, 92 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (56 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 13 recipe/loot files; unchanged slice 1 `"rolls": 1.0`; **both new loot tables `ok`** | job report |
+| artifact record | `sdk-artifact-0.2.7.txt` | bytes/sha/entries/manifest/runtime+colossal sha, check and fits lines, the packed data list | `sdk-artifact-0.2.7.txt` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-e9c9da9cf9df`, with the log
+line `Compiling evilcraft (1 of 1)`; the export's `src/`, `data/` and `horizon-mod.toml` are
+byte-identical to the port (`diff -r`/`cmp` empty, `version = "0.2.7"`), so the game ran the
+sources this package is built from. (Two earlier builds were deleted, not exported: the first
+had a `minecraft:stone` controller whose menu never opened, see harness fact 1.)
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** (A, A2, B–F, H–W, **Y, Z, AA, AB**) | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=colossal` | **`FAIL` + `EXIT:1`** at Y (*the hollow 3x3x3 shell … is not formed (formed=true)*) | `e2e-launcher-selftest-colossal.log` |
+| selftest (slices 2–6, history) | `SELFTEST=infuser|tank|blood|stain|fall` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=9 ok=9 missing-exit=0
+bad-exit=0` (exit 0): the eight earlier legs stay green and the ninth is this slice's.
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== Y: a hollow 3x3x3 shell forms one Colossal Blood Chest, which repairs one point a two ticks ==
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 0/10000 mB, repair 45, slots 46, container empty@0, [], t=9854
+  a hollow 3x3x3 of evilcraft:reinforced_undead_planks around one controller: formed=true, 45 repair slots, 46 slots
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 955/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@241], t=9910
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 820/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@214], t=9964
+  54 ticks: damage 241 -> 214 (27 points), tank 955 -> 820 (-135 mB)
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 970/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@243], t=9986
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 0/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@49], t=10455
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 0/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@49], t=10503
+  the tank emptied: damage 243 -> 49 for 970 mB (194 points at 5 mB), and 40 more ticks repair nothing
+== Z: open the shell and the machine stops (the counterfactual) ==
+  Colossal Blood Chest [198, 101, -10]: formed=false, tank 0/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@49], t=10522
+  Colossal Blood Chest [198, 101, -10]: formed=false, tank 1000/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@250], t=10542
+  Colossal Blood Chest [198, 101, -10]: formed=false, tank 1000/10000 mB, repair 45, slots 46, container empty@0, [0:minecraft:diamond_pickaxe@250], t=10590
+  one shell block out: formed=false, damage 250 and tank 1000 unchanged over 48 ticks
+  Colossal Blood Chest [198, 101, -10]: formed=false, tank 1000/10000 mB, repair 45, slots 46, container evilcraft:blood_extractor@0, [0:minecraft:diamond_pickaxe@250], t=10682
+  the menu lists 50 slots, and an extractor of 1,000 mB empties into the open machine's tank (1000 mB, container 0 mB)
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 930/10000 mB, repair 45, slots 46, container evilcraft:blood_extractor@0, [0:minecraft:diamond_pickaxe@242], t=10722
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 795/10000 mB, repair 45, slots 46, container evilcraft:blood_extractor@0, [0:minecraft:diamond_pickaxe@215], t=10775
+  the plank back: formed=true, damage 242 -> 215 in 40 ticks again
+== AA: the same pickaxe in a plain Blood Chest repairs at the same rate (the differential) ==
+  Blood Chest [198, 101, -12]: tank 965/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@243], t=10838
+  Blood Chest [198, 101, -12]: tank 825/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@215], t=10894
+  plain chest: 56 ticks, damage 243 -> 215 (28 points), tank -140 mB — one point a 2 ticks for 5 mB, as the colossal chest's 27
+== AB: the controller breaks into itself carrying its tank, and a plank drops itself ==
+  Colossal Blood Chest [198, 101, -10]: formed=true, tank 4000/10000 mB, repair 45, slots 46, container evilcraft:blood_extractor@0, [], t=11020
+  break: {"block":"minecraft:air","drops":{"evilcraft:reinforced_undead_planks":1},"picked_up":{},"items_left_on_ground":1}
+  a plank of the shell drops itself with an axe
+  break: {"block":"minecraft:air","drops":{"evilcraft:blood_extractor":1,"evilcraft:colossal_blood_chest":1},"picked_up":{},"items_left_on_ground":2}
+  the dropped evilcraft:colossal_blood_chest: Player66689 has the following entity data: {components: {"minecraft:block_entity_data": {id: "evilcraft:colossal_blood_chest", fluids: [{Amount: 4000, Fluid: "evilcraft:blood"}]}}, count: 1, id: "evilcraft:colossal_blood_chest"}
+  the controller broke into itself carrying 4000 mB of evilcraft:blood
+```
+
+**Fail-capable, four ways.** (1) `SELFTEST=colossal` inverts Y's `formed` assertion and exits 1
+(log above). (2) Z is the counterfactual: the *same* machine, the same damage-250 pickaxe and the
+same 1,000 mB repair **nothing** over 48 ticks once one shell block is out, and the repair resumes
+when the plank is back — a machine that ignored `canWork` would repair in both windows. (3) AA is
+the differential: the same pickaxe, the same 1,000 mB and the same window in a plain
+`evilcraft:blood_chest` cure the same number of points for the same 5 mB each, so the rate Y
+measures is the Blood Chest's rule and not a colossal-specific one. (4) The whole-package control
+leaves every id unknown, so Y cannot even place the controller.
+
+### Harness facts learned here
+
+1. **A mod container's menu opens only if the block's *template class* is one of the container
+   classes.** `horizon-world/src/level/interact.rs` emits `PlayerEffect::OpenMenu` for
+   `Class::AbstractFurnace | Anvil | Barrel | Beacon | BrewingStand | CartographyTable | Chest |
+   … | SmithingTable | Stonecutter | TrappedChest | Lectern`, and nothing for `Class::Block`. A
+   `minecraft:stone` controller therefore never opens its 50-slot menu: the click is accepted and
+   `screen` stays `playing`, with **no error anywhere** (measured: the container was there — a
+   stack in slot 0 spilled on break — and `/evilcraft colossal` read it fine). The other two
+   machines hid this because they use `minecraft:furnace`. The colossal now uses
+   `minecraft:smithing_table`: a full cube with **no state properties** whose class is a container,
+   which keeps the blockstate a single `""` variant. The probe that found it is kept as
+   `tools/probe-colossal.sh` (a diagnostic, not this slice's evidence).
+2. **The `id:id` command argument namespaces a bare word.** `/evilcraft load … 0 empty` arrives as
+   `minecraft:empty`, so the documented "`empty` clears the slot" never ran (it answered *"is not
+   an item this game has"*). The command accepts both spellings now; AB's tank assertion depends
+   on it (without the clear, the machine spent 110 mB repairing the pickaxe before the break and
+   the dropped item carried 3,890 instead of 4,000).
+3. **`ctl break` needs line of sight.** A far corner of the cube is behind the cube's own wall:
+   `ctl break 200 103 -8` from outside reported *did not break*. Break a shell block on the near
+   face (`198, 101, -8` here), and the controller on the same face.
+4. **The machine repairs between a harness write and the readout.** `damage … 250` then a
+   `colossal` read (which polls up to 160 ticks for a fresh line) shows `@241`, tank `955`. So the
+   setup assertions are bounds (`≤ 250`, `≥ 900 mB`) and the *rate* is measured between two
+   readouts, using the readout's own `t=` for the window (54 ticks → 27 points; 55 → 28).
+5. **The tank-empty leg is one invariant, not two constants.** With 970 mB in the tank at the
+   read, exactly 194 more points are payable: assert `damage_end == damage_start - tank/5` and
+   `tank == 0`, never a literal damage value.
+6. **The launcher is content-addressed and every source change is a new tag** (`…-2393d4c982cf`,
+   `…-7c89aa82cc5d`, `…-e9c9da9cf9df` for 0.2.7's three builds), each with `Compiling evilcraft
+   (1 of 1)` and the export `diff -r`-identical to the port. An old tag stays on disk and must not
+   be mistaken for this build.
+
+### Deviations this slice adds
+
+1. **The efficiency discount is not modelled.** `BulkRepairItemTickAction.getRequiredFluid` scales
+   the cost down by an `efficiency` that rises one per repaired point (capped 200) and decays by
+   `baseConcurrentItems` each repair tick, so a large batch costs less than 5 mB a point upstream.
+   The port charges the base 5 mB a point, as the brief asks ("reuse the existing
+   `RepairItemTickAction` numbers, invent no new rule"). The measured rate (27 points for 135 mB,
+   194 for 970) is therefore the *base* price; upstream's would drift below it on a long run.
+2. **The four upgrade slots are storage only.** Upstream's `getUpgrades()` lists efficiency, speed
+   and tier 1–3; none of their effects is modelled (no cheaper blood, no faster ticks, no tank
+   multiplier). This matches the infuser's deviation 2/3; the slots exist so a carried promise can
+   sit in them as upstream's GUI allows.
+3. **The menu's slot order is the block entity's, not upstream's.** Upstream's container adds the
+   container slot first and the 45 chest slots after it; the pin maps menu slot *n* to inventory
+   slot *n*, so the port's screen lists the 45 repair slots (0–44), then the container (45), then
+   the four upgrades (46–49). The container slot is menu slot 345 in `ctl` terms, not 300. The
+   slot *counts* are upstream's.
+4. **The structure is derived from the world on every tick, not saved.** Upstream saves a `size`
+   and a detector re-runs it on place/destroy; the port's tick reads the 26 shell cells each time
+   (a block entity's tick carries only its position, so the level is found among
+   `Levels::list_levels` by the controller's own block). The rule and its answer are the same; a
+   chunk unload of a shell cell unforms the machine until the chunk is back, where upstream's
+   saved size would keep it formed.
+5. **No `active` blockstate and no BER.** Upstream's `active` property selects between the chest
+   model and an invisible one, and the animated chest is drawn by a block entity renderer. The
+   port has no renderer (same class as the Blood Chest's cube), so the block is always the jar's
+   `colossal_blood_chest` texture on a cube and no state property is declared.
+6. **The block has no inventory faces.** Upstream's `ItemHandlerSlotMasked` exposes the container
+   slot to every face and the repair slots to all but the bottom; the port declares no faces, as
+   the Blood Chest and Infuser do, so a pipe or hopper moves nothing in or out. The menu and the
+   tick are the routes.
+7. **`copy_tank_data` reaches the third machine through the same `block_drops` route as the other
+   two** (`minecraft:block_entity_data`), not through a loot function; the chest's `copy_name` is
+   carried in the loot file and the tank is the listener's.
+
+### Upstream defects fixed
+
+None new. (`copy_tank_data`'s applier, the shadowed leather recipe, the 25,000 mB recipe and the
+missing pickaxe tag are the earlier slices'.) One upstream oddity is recorded, not "fixed": the
+jar's `blockstates/colossal_blood_chest.json` maps `active=false` to the *visible* model and
+`active=true` to the invisible one, which is the inverse of what reading the property suggests;
+the port draws the visible model in every state (deviation 5).
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `colossal_blood_chest` block, item, blockstate, model, texture, lang, creative row | **tested** | Y: placed from the game's own `/fill` + `/setblock`, read back at `198,101,-10` |
+| the 3×3×3 hollow shell (`HollowCubeDetector` + `ExactSizeValidator(2,2,2)` + `ExactBlockCountValidator(1)`) | **tested** | Y: `formed=true` with 25 planks and one controller, middle air; unit tests for every shell cell, a missing plank, a filled middle, a second chest, a lone chest and an oversized cube |
+| one shell block out → not formed | **tested** | Z: `formed=false` and no repair over 48 ticks; the unit `a_missing_shell_block_breaks_the_structure` |
+| 45 repair slots, the container slot, the four upgrade slots | **tested** | Y/Z: `repair 45`, `slots 46`, the menu lists **50** slots (phase Z opens it) |
+| the repair tick (`baseMBPerDamage 5`, `ticksPerDamage 2`, the anvil step) | **tested** | Y: 27 points / 135 mB in 54 ticks; AA: the plain chest 28 / 140 in 56; the anvil path is the shared `runtime::anvil_step` (slice 1's phase D) |
+| the tank's 10,000 mB and the "until it empties" rule | **tested** | Y: 970 mB → 194 points → tank 0, 40 more ticks repair nothing |
+| the container slot emptying a filled extractor **while unformed** | **tested** | Z: 1,000 mB extractor → tank 1,000, container 0 |
+| `copy_tank_data` on the colossal chest (the tank in the dropped controller) | **tested** | AB: 4,000 mB broken, carried, read back from the dropped item's `minecraft:block_entity_data` |
+| loot tables + `minecraft:mineable/axe` for both blocks | **tested** | AB: a plank drops itself, the controller drops itself, both with a diamond axe in survival |
+| `/evilcraft colossal`, and `blood`/`damage`/`load` reaching the machine | **tested** | every readout above |
+| the efficiency discount (`MAX_EFFICIENCY`, `baseConcurrentItems`) | not ported | deviation 1 |
+| efficiency/speed/tier upgrades in the four upgrade slots | not ported | deviation 2 (the slots exist as storage) |
+| the `active` blockstate and the animated BER chest | not ported | deviation 5 (no renderer at this tier's shape) |
+| the jar's `colossal_blood_chest` / `reinforced_undead_planks` recipes | not ported | their ingredients (`blood_infusion_core`, `undead_planks`) are not carried — gap 1 |
 
 ### Skills
 

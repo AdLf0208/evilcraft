@@ -351,6 +351,12 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         "evilcraft stain <pos:block_pos>",
         OPERATOR_LEVEL,
     ));
+    // The Colossal Blood Chest's readout: whether its 3×3×3 shell is whole, its tank, its
+    // container slot and its repair slots.
+    event.commands.push(Command::op(
+        "evilcraft colossal <pos:block_pos>",
+        OPERATOR_LEVEL,
+    ));
     // `<id:id>` is a free `namespace:path` identifier: a `word` argument stops at the
     // colon (the campaign's `item`-argument trap, so no `item` kind here).
     event.commands.push(Command::op(
@@ -376,11 +382,12 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
         "damage" => set_damage(host, source, invocation),
         "infuser" => crate::infuser::readout(host, source, invocation),
         "stain" => crate::stain::readout(host, source, invocation),
+        "colossal" => crate::colossal::readout(host, source, invocation),
         "load" => crate::infuser::load(host, source, invocation),
         "held" => held(host, source, invocation),
         _ => say(
             host,
-            "usage: /evilcraft info|blood|damage|infuser|stain|load|held ...".to_owned(),
+            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|load|held ...".to_owned(),
         ),
     }
     Flow::Cancel
@@ -485,17 +492,20 @@ fn set_damage(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Co
         say(host, usage.to_owned());
         return;
     };
-    let Some(entity) = mod_entity(host, source, pos) else {
+    let Some((entity, noun, slots)) = machine_at(host, source, pos) else {
         return;
     };
-    let Ok(Some(mut stack)) = entity.item_slot(host, u32::try_from(slot.max(0)).unwrap_or(0))
-    else {
+    let slot = u32::try_from(slot.max(0)).unwrap_or(0);
+    if slot as usize >= slots {
+        say(host, format!("{pos:?} has no slot {slot}."));
+        return;
+    }
+    let Ok(Some(mut stack)) = entity.item_slot(host, slot) else {
         say(host, format!("{pos:?} has no such stack."));
         return;
     };
     write_damage(&mut stack, u32::try_from(amount.max(0)).unwrap_or(0));
     let item = stack.item().id(host);
-    let slot = u32::try_from(slot.max(0)).unwrap_or(0);
     let written = host
         .transaction(|host, tx| -> Result<bool, ()> {
             Ok(entity
@@ -506,13 +516,43 @@ fn set_damage(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Co
     say(
         host,
         match written {
-            true => format!(
-                "Blood Chest at {pos:?}: {item} at damage {}.",
-                amount.max(0)
-            ),
+            true => format!("{noun} at {pos:?}: {item} at damage {}.", amount.max(0)),
             false => format!("{pos:?} kept its stack."),
         },
     );
+}
+
+/// The machine at `pos` whose stack slots this port's harness commands may write — the
+/// Blood Chest, the Blood Infuser or the Colossal Blood Chest — with the name a reply uses
+/// and how many slots it has, or a line saying the position is not one of them.
+pub(crate) fn machine_at(
+    host: &mut dyn ServerHost,
+    source: &CommandSource,
+    pos: [i32; 3],
+) -> Option<(BlockEntityRef, &'static str, usize)> {
+    let Some(level) = level_of(host, source) else {
+        say(host, "evilcraft: no level is open here.".to_owned());
+        return None;
+    };
+    let machine = level
+        .block(host, pos)
+        .and_then(|key| match key.id(host).as_str() {
+            CHEST_ID => Some(("Blood Chest", SLOT_COUNT)),
+            crate::infuser::INFUSER_ID => Some(("Blood Infuser", crate::runtime::INFUSER_SLOTS)),
+            crate::runtime::COLOSSAL => {
+                Some(("Colossal Blood Chest", crate::runtime::COLOSSAL_INVENTORY))
+            }
+            _ => None,
+        });
+    match (machine, host.block_entity(level, pos)) {
+        (Some((noun, slots)), Some(entity)) if entity.data(host).is_some() => {
+            Some((entity, noun, slots))
+        }
+        _ => {
+            say(host, format!("{pos:?} is not a machine of this mod."));
+            None
+        }
+    }
 }
 
 /// `/evilcraft held [<amount>]`: read — or, for an operator, set — the held extractor's
@@ -628,11 +668,12 @@ pub(crate) fn our_entity(
     }
 }
 
-/// The mod block at `pos` that holds a blood tank — a Blood Chest, a Blood Infuser or a
-/// Blood Stain — with the capacity of its own tank, or a line saying it holds none.
+/// The mod block at `pos` that holds a blood tank — a Blood Chest, a Blood Infuser, a
+/// Colossal Blood Chest or a Blood Stain — with the capacity of its own tank, or a line
+/// saying it holds none.
 ///
-/// The three share the saved `fluids` shape and the `/evilcraft blood` setter, but not
-/// their size: a stain is upstream's five-bucket splash, the two machines ten.
+/// They share the saved `fluids` shape and the `/evilcraft blood` setter, but not their
+/// size: a stain is upstream's five-bucket splash, the three machines ten.
 fn tanked(
     host: &mut dyn ServerHost,
     source: &CommandSource,
@@ -645,7 +686,7 @@ fn tanked(
     let capacity = level
         .block(host, pos)
         .and_then(|key| match key.id(host).as_str() {
-            CHEST_ID | crate::infuser::INFUSER_ID => Some(TANK_CAPACITY),
+            CHEST_ID | crate::infuser::INFUSER_ID | crate::runtime::COLOSSAL => Some(TANK_CAPACITY),
             crate::runtime::STAIN => Some(crate::runtime::STAIN_TANK),
             _ => None,
         });

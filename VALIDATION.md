@@ -325,3 +325,66 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 8/8 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 7 (0.2.7) — the Colossal Blood Chest (`BlockColossalBloodChest`, upstream's hollow cube)
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 7**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`. Every step ran through `ports/tools/build-slot.sh`
+(`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`).
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` with `colossal_formed` stubbed to `None` | **FAILED 2/56** — *putting the plank back at [10, 103, -20] forms the cube again* (`left: None / right: Some([10, 101, -20])`), *a chest at [10, 101, -20] is a shell cell of the cube* | `sdk-test-red-slice7.log` |
+| tests (green) | `cargo test` | **56 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 518 API uses, 16 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **199,156 B** `71f78499ac66335de499b50957ac522419abe0063cb8eabb8cdf260615b6d9f1`, `CMP-IDENTICAL`, 92 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check.log` |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | exit 0 — `0a875da  made for` | `sdk-fits.log` |
+| fits (another build) | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | exit 0 — `0b14f8a  fits` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** (56 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 13 recipe/loot files: slice 1's one unverified `"rolls": 1.0`; both new loot tables `ok` | job report |
+| artifact record | `sdk-artifact-0.2.7.txt` | bytes/sha/entries/manifest/runtime+colossal sha, check and fits lines, the packed data and asset list | `sdk-artifact-0.2.7.txt` |
+
+Launcher build: `native-0a875da-e9c9da9cf9df`, log line `Compiling evilcraft (1 of 1)`; the
+export's `src/`, `data/` and `horizon-mod.toml` are byte-identical to the port (`diff -r`/`cmp`
+empty, version `0.2.7`). Two earlier builds of this slice were deleted rather than exported (the
+first shipped a `minecraft:stone` controller whose menu never opened — `notes.md` § Slice 7,
+harness fact 1).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** — A, A2, B–F, H–W, Y, Z, AA, AB | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=colossal` | **`FAIL` + `EXIT:1`** at Y — *the hollow 3x3x3 shell at 198,101,-10 is not formed (formed=true)* | `e2e-launcher-selftest-colossal.log` |
+| selftest (slices 2–6, history) | `SELFTEST=infuser|tank|blood|stain|fall` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=9 ok=9 missing-exit=0
+bad-exit=0` (exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- Y: a hollow 3×3×3 of 25 `evilcraft:reinforced_undead_planks` around **one**
+  `evilcraft:colossal_blood_chest` (middle cell air) reads `formed=true`, `repair 45`,
+  `slots 46`, a 10,000 mB tank; with 955 mB and a damage-241 diamond pickaxe in slot 0 it cured
+  **27 points in 54 ticks for 135 mB** (one point a two ticks, 5 mB each), and the tank emptied
+  after exactly its own `tank / 5` points (`970 mB` → `194` points → `0` mB, then 40 ticks with
+  no repair).
+- Z: one shell block removed reads `formed=false` and the same pickaxe and tank stay `250` /
+  `1,000 mB` over 48 ticks; the menu lists **50 slots** and a 1,000 mB extractor still empties
+  into the tank of the *open* machine (`container 0`); the plank back reads `formed=true` and the
+  repair resumes.
+- AA: the same damage-243 pickaxe, the same 1,000 mB and a 56-tick window in a plain Blood Chest
+  cure **28 points for 140 mB** — the same one-a-two-ticks and 5 mB a point.
+- AB: with 4,000 mB and no damaged stack, a diamond axe in survival breaks a shell plank (it drops
+  itself) and then the controller, which drops its own item carrying
+  `minecraft:block_entity_data` `{id: "evilcraft:colossal_blood_chest", fluids: [{Amount: 4000,
+  Fluid: "evilcraft:blood"}]}`.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 9/9 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
