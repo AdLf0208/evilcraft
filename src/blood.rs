@@ -362,6 +362,11 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         "evilcraft darktank <pos:block_pos>",
         OPERATOR_LEVEL,
     ));
+    // The Purifier's readout: its three-bucket tank, its two slots and the curse clock.
+    event.commands.push(Command::op(
+        "evilcraft purifier <pos:block_pos>",
+        OPERATOR_LEVEL,
+    ));
     // `<id:id>` is a free `namespace:path` identifier: a `word` argument stops at the
     // colon (the campaign's `item`-argument trap, so no `item` kind here).
     event.commands.push(Command::op(
@@ -374,7 +379,7 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         .push(Command::op("evilcraft held <amount:integer>", 2));
 }
 
-/// `/evilcraft info|blood|damage|infuser|stain|colossal|darktank|load|held`
+/// `/evilcraft info|blood|damage|infuser|stain|colossal|darktank|purifier|load|held`
 /// (`run_mod_command`).
 pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
     let source = event.source;
@@ -390,11 +395,12 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
         "stain" => crate::stain::readout(host, source, invocation),
         "colossal" => crate::colossal::readout(host, source, invocation),
         "darktank" => crate::dark_tank::readout(host, source, invocation),
+        "purifier" => crate::purifier::readout(host, source, invocation),
         "load" => crate::infuser::load(host, source, invocation),
         "held" => held(host, source, invocation),
         _ => say(
             host,
-            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|darktank|load|held ..."
+            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|darktank|purifier|load|held ..."
                 .to_owned(),
         ),
     }
@@ -531,8 +537,8 @@ fn set_damage(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Co
 }
 
 /// The machine at `pos` whose stack slots this port's harness commands may write — the
-/// Blood Chest, the Blood Infuser or the Colossal Blood Chest — with the name a reply uses
-/// and how many slots it has, or a line saying the position is not one of them.
+/// Blood Chest, the Blood Infuser, the Colossal Blood Chest or the Purifier — with the name
+/// a reply uses and how many slots it has, or a line saying the position is not one of them.
 pub(crate) fn machine_at(
     host: &mut dyn ServerHost,
     source: &CommandSource,
@@ -550,6 +556,7 @@ pub(crate) fn machine_at(
             crate::runtime::COLOSSAL => {
                 Some(("Colossal Blood Chest", crate::runtime::COLOSSAL_INVENTORY))
             }
+            crate::runtime::PURIFIER => Some(("Purifier", crate::runtime::PURIFIER_SLOTS)),
             _ => None,
         });
     match (machine, host.block_entity(level, pos)) {
@@ -677,12 +684,12 @@ pub(crate) fn our_entity(
 }
 
 /// The mod block at `pos` that holds a blood tank — a Blood Chest, a Blood Infuser, a
-/// Colossal Blood Chest, a Blood Stain or a Dark Tank — with the capacity of its own tank,
-/// or a line saying it holds none.
+/// Colossal Blood Chest, a Blood Stain, a Dark Tank or a Purifier — with the capacity of its
+/// own tank, or a line saying it holds none.
 ///
 /// They share the saved `fluids` shape and the `/evilcraft blood` setter, but not their
-/// size: a stain is upstream's five-bucket splash, the three machines ten, the dark tank
-/// sixteen.
+/// size: a stain is upstream's five-bucket splash, the purifier three, the three machines
+/// ten, the dark tank sixteen.
 fn tanked(
     host: &mut dyn ServerHost,
     source: &CommandSource,
@@ -698,6 +705,7 @@ fn tanked(
             CHEST_ID | crate::infuser::INFUSER_ID | crate::runtime::COLOSSAL => Some(TANK_CAPACITY),
             crate::runtime::STAIN => Some(crate::runtime::STAIN_TANK),
             crate::runtime::DARK_TANK => Some(crate::runtime::DARK_TANK_CAPACITY),
+            crate::runtime::PURIFIER => Some(crate::runtime::PURIFIER_TANK),
             _ => None,
         });
     match (capacity, host.block_entity(level, pos)) {

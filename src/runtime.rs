@@ -154,6 +154,18 @@ pub const CHEST: &str = "evilcraft:blood_chest";
 pub const EXTRACTOR: &str = "evilcraft:blood_extractor";
 /// The Blood Stain: the splash a mob's fall leaves, and an extractor's source.
 pub const STAIN: &str = "evilcraft:blood_stain";
+/// `ItemBlookConfig`: a Book infused with Blood (`ItemBlookConfig` registers a plain item).
+pub const BLOOK: &str = "evilcraft:blook";
+/// Every item id this package registers besides vanilla's: the extractor, the blook and the
+/// three tier promises (`data/evilcraft/horizon/item/`). A carried recipe may name these or
+/// `minecraft:`; nothing else is an item the game or the package has.
+pub const CARRIED_ITEMS: &[&str] = &[
+    EXTRACTOR,
+    BLOOK,
+    "evilcraft:promise_tier_1",
+    "evilcraft:promise_tier_2",
+    "evilcraft:promise_tier_3",
+];
 /// Upstream `BlockEntityBloodStain.CAPACITY`: five buckets of blood.
 pub const STAIN_TANK: i32 = 5 * BUCKET;
 /// The tank's fluid id. Horizon has no blood block or bucket, so this is a tank id.
@@ -587,6 +599,75 @@ pub fn tank_fill(tank: i32, extractor: i32) -> TankFill {
         extractor: keeps,
         moved: extractor - keeps,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Slice 9: the Purifier (`BlockPurifier`, `ToolBadEnchantPurifyAction`)
+// ---------------------------------------------------------------------------
+
+/// `BlockPurifier`: the block, its block entity type and its item's id.
+pub const PURIFIER: &str = "evilcraft:purifier";
+/// `BlockEntityPurifier.SLOT_PURIFY`: the stack the machine works on.
+pub const PURIFIER_PURIFY_SLOT: usize = 0;
+/// `BlockEntityPurifier.SLOT_ADDITIONAL`: upstream's book/bottle/head slot, which only the
+/// three actions this package does not carry ever fill.
+pub const PURIFIER_ADDITIONAL_SLOT: usize = 1;
+/// `BlockEntityPurifier.SLOTS`.
+pub const PURIFIER_SLOTS: usize = 2;
+/// `BlockEntityPurifier.MAX_BUCKETS`: three buckets of blood, the smallest machine tank.
+pub const PURIFIER_TANK: i32 = 3 * BUCKET;
+/// `ToolBadEnchantPurifyAction.PURIFY_DURATION`: the ticks one curse level takes.
+pub const PURIFY_DURATION: u32 = 60;
+/// `EnchantmentTags.CURSE` (`#minecraft:curse`): vanilla's two curses, named here because the
+/// pin's tag reads cover the block, item and fluid registries only ([`crate::purifier`]).
+pub const CURSES: &[&str] = &["minecraft:binding_curse", "minecraft:vanishing_curse"];
+
+/// Whether an enchantment is one this action removes (`EnchantmentTags.CURSE`).
+#[must_use]
+pub fn is_curse(enchantment: &str) -> bool {
+    CURSES.contains(&enchantment)
+}
+
+/// One tick of the purifier's curse action: `(tick after this one, whether it completed)`.
+///
+/// Upstream's `BlockEntityPurifier.Ticker` adds one to the component's tick and then runs
+/// the action, and `ToolBadEnchantPurifyAction.canWork` refuses a machine with no cursed
+/// stack or with less than one bucket of blood (`getBucketsFloored() > 0`). `None` is that
+/// refusal, which resets the clock. `PURIFY_DURATION` is checked to be at least one.
+#[must_use]
+pub fn purify_tick(tick: u32, curses: usize, tank: i32) -> Option<(u32, bool)> {
+    if curses == 0 || tank < BUCKET {
+        return None;
+    }
+    let next = tick.saturating_add(1);
+    if next >= PURIFY_DURATION.max(1) {
+        Some((0, true))
+    } else {
+        Some((next, false))
+    }
+}
+
+/// What a completed purify writes, and how many curses it stripped: every curse loses one
+/// level (and is gone at level 0), every other enchantment is untouched.
+///
+/// `ToolBadEnchantPurifyAction.work` runs `EnchantmentHelpers.runIterationOnItem` over the
+/// stack and, on the duration tick, sets each curse's level to `level - 1`. One bucket of
+/// blood pays for each curse it touched (`setBuckets(getBucketsFloored() - 1, rest)`), so
+/// the returned count is also the buckets the caller must spend.
+#[must_use]
+pub fn purified(levels: &[(String, u32)]) -> (Vec<(String, u32)>, i32) {
+    let mut curses = 0;
+    let kept = levels
+        .iter()
+        .filter_map(|(id, level)| {
+            if !is_curse(id) {
+                return Some((id.clone(), *level));
+            }
+            curses += 1;
+            (*level > 1).then(|| (id.clone(), level - 1))
+        })
+        .collect();
+    (kept, curses)
 }
 
 #[cfg(test)]
@@ -1271,5 +1352,121 @@ mod tests {
         assert_eq!(restored_tank_with(12_000, DARK_TANK_CAPACITY), 12_000);
         // The ten-bucket machines keep their own clamp.
         assert_eq!(carried_tank(20_000), Some(TANK_CAPACITY));
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 9: the Purifier's curse action, and the Blook
+    // -----------------------------------------------------------------------
+
+    /// One stack's enchantments, as the component states them: `(id, level)` in file order.
+    fn levels(entries: &[(&str, u32)]) -> Vec<(String, u32)> {
+        entries
+            .iter()
+            .map(|(id, level)| ((*id).to_owned(), *level))
+            .collect()
+    }
+
+    #[test]
+    fn a_book_becomes_a_blook_for_five_hundred_mb() {
+        // `data/evilcraft/recipe/blood_infuser/base/blook.json`, the jar's own file: an
+        // `evilcraft:blood_infuser` recipe of tier 1 that costs 500 mB over 500 ticks.
+        let recipes = carried();
+        let blook = infusion_for(&recipes, "minecraft:book", 1).expect("a book is infused");
+        assert_eq!(blook.output, BLOOK);
+        assert_eq!(blook.output_count, 1);
+        assert_eq!((blook.blood, blook.ticks, blook.tier), (500, 500, 1));
+        // And a tier-1 machine is the least that runs it, as the file's tier says.
+        assert_eq!(infusion_for(&recipes, "minecraft:book", 0), None);
+    }
+
+    #[test]
+    fn every_carried_recipe_names_items_this_package_or_the_game_has() {
+        // The infuser's files are data: a recipe naming an id nobody registers is dead data
+        // (the jar's own 40 include exactly that class of defect). Every input and product
+        // is vanilla's or one of this package's own items.
+        let recipes = carried();
+        assert!(!recipes.is_empty());
+        for recipe in &recipes {
+            for id in [&recipe.input, &recipe.output] {
+                assert!(
+                    id.starts_with("minecraft:") || CARRIED_ITEMS.contains(&id.as_str()),
+                    "{} names {id}, which neither the game nor this package registers",
+                    recipe.id
+                );
+            }
+        }
+        // The blook is one of the ids the test above relies on.
+        assert!(CARRIED_ITEMS.contains(&BLOOK));
+    }
+
+    #[test]
+    fn a_curse_takes_sixty_ticks_and_one_bucket_of_blood() {
+        // `ToolBadEnchantPurifyAction.PURIFY_DURATION` = 60; the ticker adds one before the
+        // action runs, so the sixtieth tick is the one that finishes it.
+        assert_eq!(purify_tick(0, 1, PURIFIER_TANK), Some((1, false)));
+        assert_eq!(purify_tick(58, 1, PURIFIER_TANK), Some((59, false)));
+        assert_eq!(purify_tick(59, 1, PURIFIER_TANK), Some((0, true)));
+        assert_eq!(PURIFY_DURATION, 60);
+    }
+
+    #[test]
+    fn a_clean_stack_or_a_tank_under_one_bucket_never_works() {
+        // `canWork`: `!getPurifyItem().isEmpty() && getBucketsFloored() > 0` and a curse.
+        assert_eq!(
+            purify_tick(10, 0, PURIFIER_TANK),
+            None,
+            "no curse to remove"
+        );
+        assert_eq!(
+            purify_tick(10, 1, BUCKET - 1),
+            None,
+            "a tank under one bucket cannot pay"
+        );
+        assert_eq!(purify_tick(10, 1, BUCKET), Some((11, false)));
+    }
+
+    #[test]
+    fn a_finished_purify_strips_one_level_of_every_curse_and_keeps_the_rest() {
+        // A level-1 curse is gone; every other enchantment is untouched, and one bucket a
+        // curse is spent.
+        let (kept, curses) = purified(&levels(&[
+            ("minecraft:vanishing_curse", 1),
+            ("minecraft:sharpness", 3),
+        ]));
+        assert_eq!(kept, levels(&[("minecraft:sharpness", 3)]));
+        assert_eq!(curses, 1);
+        // A level-2 curse loses one level and stays, as `setEnchantmentLevel(level - 1)` says.
+        let (kept, curses) = purified(&levels(&[("minecraft:binding_curse", 2)]));
+        assert_eq!(kept, levels(&[("minecraft:binding_curse", 1)]));
+        assert_eq!(curses, 1);
+        // Two curses cost two buckets in the one tick, as upstream's iteration does.
+        let (kept, curses) = purified(&levels(&[
+            ("minecraft:binding_curse", 1),
+            ("minecraft:vanishing_curse", 1),
+            ("minecraft:mending", 1),
+        ]));
+        assert_eq!(kept, levels(&[("minecraft:mending", 1)]));
+        assert_eq!(curses, 2);
+        // And a stack with no curse is written back unchanged.
+        let plain = levels(&[("minecraft:sharpness", 2)]);
+        assert_eq!(purified(&plain), (plain.clone(), 0));
+    }
+
+    #[test]
+    fn only_vanillas_two_curses_are_curses() {
+        assert!(is_curse("minecraft:binding_curse"));
+        assert!(is_curse("minecraft:vanishing_curse"));
+        assert!(!is_curse("minecraft:sharpness"));
+        assert!(!is_curse("minecraft:fortune"));
+        assert_eq!(CURSES.len(), 2);
+    }
+
+    #[test]
+    fn the_purifier_has_two_slots_and_three_buckets() {
+        // `BlockEntityPurifier.SLOTS` and `.MAX_BUCKETS`.
+        assert_eq!((PURIFIER_SLOTS, PURIFIER_ADDITIONAL_SLOT), (2, 1));
+        assert_eq!(PURIFIER_PURIFY_SLOT, 0);
+        assert_eq!(PURIFIER_TANK, 3 * BUCKET);
+        assert_eq!(PURIFIER, "evilcraft:purifier");
     }
 }

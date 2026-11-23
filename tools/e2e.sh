@@ -108,6 +108,28 @@
 #  AE in survival the tank breaks into its own item carrying 12,000 mB (the machines' clamp
 #     would cut that to 10,000) and places back reading `12000/16000 mB`.
 #
+# Slice 9 — the Purifier's curse action (`ToolBadEnchantPurifyAction`) and the Blook:
+#  AF a fresh `evilcraft:purifier` reads `0/3000 mB` with an empty purge slot; a **standing**
+#     click with a `/give`n cursed diamond pickaxe puts exactly one of it in the purify slot,
+#     and the block entity's own saved `Items[0]` carries `minecraft:enchantments` with
+#     `minecraft:vanishing_curse` (the positive control of the curse assertion);
+#  AG with the tank full, 140 ticks run the 60-tick action: the purge slot's saved item
+#     carries **no** `minecraft:enchantments` any more and the tank fell by exactly one bucket
+#     (3,000 -> 2,000), while the item itself stays in the slot (the action strips, never
+#     consumes);
+#  AH the differential: the same cursed pickaxe in a working `evilcraft:blood_chest` for the
+#     same 140 ticks still carries the curse and the chest spends nothing (an undamaged tool
+#     is not a repair) — the purifier's result is its own rule;
+#  AI the clicks in the other directions: an empty-hand right-click takes the pickaxe back out
+#     of the purge slot, a standing click with a filled extractor puts the extractor in the
+#     slot (and pours nothing), and once it is back in hand a **crouching** click pours exactly
+#     the 1,000 mB room the tank had (extractor 5,000 -> 4,000, the saved `fluids` 3,000).
+#
+# The Blook (`evilcraft:blook`) is carried as an item and its own infusion recipe: phase L
+# crafts it through the Blood Infuser (`minecraft:book` -> `evilcraft:blook` for 500 mB in 500
+# ticks at tier 1), which is also what proves the recipe's keys resolve to items this package
+# registers.
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
@@ -128,7 +150,8 @@
 #
 # SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
 # SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's,
-# SELFTEST=colossal flips Y's `formed` assertion and SELFTEST=darktank flips AC's pour (each
+# SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour and
+# SELFTEST=purifier flips AG's curse-gone assertion (each
 # must FAIL), proving the scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
@@ -171,12 +194,19 @@ INFUSER=evilcraft:blood_infuser
 STAIN=evilcraft:blood_stain
 COLOSSAL=evilcraft:colossal_blood_chest
 DARK_TANK=evilcraft:dark_tank
+PURIFIER=evilcraft:purifier
 PLANKS=evilcraft:reinforced_undead_planks
 EXTRACTOR=evilcraft:blood_extractor
 PROMISE=evilcraft:promise_tier_3
 TANK_CAPACITY=10000
 STAIN_TANK=5000
 DARK_TANK_CAPACITY=16000
+PURIFIER_TANK=3000
+# A tool the game itself gives, with one curse on it (`ToolBadEnchantPurifyAction`'s input).
+# 26.3's component is the **bare map**: the 1.21.1 shape `{levels:{…}}` is refused by this
+# build's `/give` ("Failed to get element minecraft:levels from registry minecraft:enchantment"),
+# and SNBT's unquoted form allows no colon, so the enchantment id is quoted.
+CURSED_PICKAXE='minecraft:diamond_pickaxe[minecraft:enchantments={"minecraft:vanishing_curse":1}]'
 MB_PER_DAMAGE=5
 TICKS_PER_DAMAGE=2
 
@@ -242,9 +272,13 @@ arena() {
         fi
     done
     [ "$loaded" = true ] || fail "the End arena chunk never loaded"
-    ctl command "execute in minecraft:the_end run fill $((X0 - 2)) 100 -14 $((X0 + 8)) 100 14 minecraft:stone" >/dev/null
+    # The floor runs six cells west of X0: `break_survival` stands a player at `x - 3`, and the
+    # Colossal Blood Chest's controller sits at `X0 - 2`, so its breaks are made from `X0 - 5` —
+    # outside a floor that started at `X0 - 2`, where the player fell into the void and the
+    # break sometimes missed (measured 2026-11-23, phase AB).
+    ctl command "execute in minecraft:the_end run fill $((X0 - 6)) 100 -14 $((X0 + 8)) 100 14 minecraft:stone" >/dev/null
     ctl wait 6 >/dev/null
-    ctl command "execute in minecraft:the_end run fill $((X0 - 2)) 101 -14 $((X0 + 8)) 108 14 minecraft:air" >/dev/null
+    ctl command "execute in minecraft:the_end run fill $((X0 - 6)) 101 -14 $((X0 + 8)) 108 14 minecraft:air" >/dev/null
     ctl wait 6 >/dev/null
     ctl command "execute in minecraft:the_end run kill @e[type=!player]" >/dev/null
     ctl command "execute in minecraft:the_end run tp @s $X0.5 101 0.5" >/dev/null
@@ -277,18 +311,37 @@ place_chest() { # place_chest X Y Z [ITEM]
     local x=$1 y=$2 z=$3 item=${4:-$CHEST}
     ctl command "execute in minecraft:the_end run tp @s $((x - 2)).5 $y $z.5" >/dev/null
     ctl wait 6 >/dev/null
+    # The End spawns endermen, and one standing in the cell makes `ctl place` answer "the block
+    # did not change (blocked by an entity)" (measured 2026-11-23 in phase AC; `place_stain`
+    # has cleared them for the same reason since slice 5).
+    ctl command "execute in minecraft:the_end run kill @e[type=!player,distance=..8]" >/dev/null 2>&1 || true
+    ctl wait 6 >/dev/null
     ctl command "item replace entity @s hotbar.0 with $item 1" >/dev/null
     ctl wait 4 >/dev/null
     ctl select 1 >/dev/null
     ctl wait 2 >/dev/null
-    local aim reply
+    local aim reply name attempt
     aim=$(ctl look-at-block "$x" $((y - 1)) "$z" up 2>&1) \
         || fail "cannot aim at the floor under $x,$y,$z: $aim"
-    reply=$(ctl place "$x" "$y" "$z" --item "$item" 2>&1) \
-        || fail "ctl place at $x,$y,$z failed: $(tr -d '\n' <<<"$reply" | cut -c1-300)"
-    ctl wait 6 >/dev/null
-    local name
+    # `ctl place` reports the block two ticks after its click, so a click the client dropped (or
+    # the server applied a tick late) reads as "the block did not change": the same fault
+    # `place_stain` retries around. Three attempts, then the plain right-click a player makes.
+    for attempt in 1 2 3; do
+        if reply=$(ctl place "$x" "$y" "$z" --item "$item" 2>&1); then
+            [ "$(block_name "$x" "$y" "$z")" = "$item" ] && break
+        fi
+        echo "  ctl place attempt $attempt did not land yet: $(tr -d '\n' <<<"$reply" | cut -c1-200)" >&2
+        ctl wait 20 >/dev/null
+    done
     name=$(block_name "$x" "$y" "$z")
+    if [ "$name" != "$item" ]; then
+        echo "  falling back to a plain right-click on the floor below" >&2
+        ctl look-at-block "$x" $((y - 1)) "$z" up >/dev/null 2>&1 || true
+        ctl wait 4 >/dev/null
+        ctl interact "$x" $((y - 1)) "$z" up >/dev/null 2>&1 || true
+        ctl wait 20 >/dev/null
+        name=$(block_name "$x" "$y" "$z")
+    fi
     [ "$name" = "$item" ] || fail "$item did not place at $x,$y,$z (got '$name')"
 }
 
@@ -436,6 +489,28 @@ darktank() { # darktank X Y Z
     eval "$(python3 "$PORT/tools/parse_darktank.py" "$DARKTANK_LINE")"
     [ "${ok:-0}" = 1 ] || fail "the dark tank line did not parse: $DARKTANK_LINE"
     echo "  $DARKTANK_LINE" >&2
+}
+
+# `/evilcraft purifier X Y Z`: the line, then the parsed fields in TANK, CAPACITY,
+# PURGE_ITEM, PURGE_COUNT, ADD_ITEM, ADD_COUNT, ENCH, CURSES, TICK and TIME.
+purifier() { # purifier X Y Z
+    # Wait for the reply itself: the chat is read newest first and the readout ends in
+    # `t=<game time>`, so a new one can never equal the previous one.
+    local prev line i
+    prev=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Purifier \[' || true)
+    say "evilcraft purifier $1 $2 $3"
+    line=$prev
+    for i in $(seq 1 40); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Purifier \[' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] \
+        || fail "no /evilcraft purifier reply for $1 $2 $3 (last: '${line}')"
+    PURIFIER_LINE=$line
+    eval "$(python3 "$PORT/tools/parse_purifier.py" "$PURIFIER_LINE")"
+    [ "${ok:-0}" = 1 ] || fail "the purifier line did not parse: $PURIFIER_LINE"
+    echo "  $PURIFIER_LINE" >&2
 }
 
 # Place a stain from its own item on the arena floor below X Y Z.
@@ -653,6 +728,39 @@ saved_tank() { # x y z
     SAVED_MB=$(sed -n 's/.*has the following block data: \(-\{0,1\}[0-9][0-9]*\)$/\1/p' <<<"$line")
     [ -n "$SAVED_MB" ] || fail "the data get reply did not parse: $line"
     echo "  $line" >&2
+}
+
+# `/data get block X Y Z Items[SLOT]`: the block entity's own saved stack with its components,
+# which is the *server's* view of the item (a mod container saves its stacks under `Items`).
+# Sets `SAVED_ITEM`. Waits for a reply newer than the previous one, as every readout does.
+saved_item() { # x y z slot
+    local slot=$4 prev line i
+    prev=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'has the following block data' || true)
+    ctl command "data get block $1 101 $3 Items[$slot]" >/dev/null
+    line=$prev
+    for i in $(seq 1 25); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 20 | jq -r '.chat[]' | grep -m1 'has the following block data' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] \
+        || fail "no data get reply for Items[$slot] at $1,101,$3 (last: '${line}')"
+    SAVED_ITEM=$line
+    echo "  $line" >&2
+}
+
+# The player's main hand is genuinely empty, and the client knows it: `clear @s` alone leaves
+# the client's own held stack stale, and a right-click with a stale stack sends no use packet
+# at all (measured 2026-11-23, the probe's empty-hand click after a `clear`). Selecting an empty
+# hotbar slot is the player action that syncs it.
+empty_hand() {
+    ctl command "clear @s" >/dev/null
+    ctl wait 8 >/dev/null
+    ctl select 2 >/dev/null
+    ctl wait 8 >/dev/null
+    local held
+    held=$(ctl inventory | jq -r '.held.item // ""')
+    [ -z "$held" ] || fail "the hand still holds $held after clearing it"
 }
 
 # `/evilcraft held`, waiting for the *new* reply: the chat is read newest first, so a fixed
@@ -919,7 +1027,9 @@ place_chest "$IX" 101 0 "$INFUSER"
 infuser "$IX" 101 0
 [ "$TANK" = 0 ] || fail "a fresh infuser holds $TANK mB, expected 0"
 [ "$TIER" = 0 ] || fail "a fresh infuser is tier $TIER, expected 0"
-[ "$CARRIED" = 9 ] || fail "the package claims $CARRIED carried recipes, expected 9"
+# The jar's nine `convenience/` infusions plus `base/blook` (10 as of slice 9), and the
+# machine reads every one of them (`recipes_of_type`).
+[ "$CARRIED" = 10 ] || fail "the package claims $CARRIED carried recipes, expected 10"
 [ "$RECIPES" = "$CARRIED" ] || fail "the infuser reads $RECIPES of its $CARRIED recipe files, so the recipe type did not load"
 [ "$OUT_ITEM" = "empty" ] || fail "a fresh infuser holds $OUT_ITEM in its result slot"
 echo "  block $(block_name "$IX" 101 0), $RECIPES/$CARRIED recipe files in force"
@@ -980,6 +1090,10 @@ infuse minecraft:rotten_flesh minecraft:spider_eye 8 375 500
 infuse minecraft:brown_mushroom minecraft:red_mushroom 1 2000 150
 infuse minecraft:skeleton_skull minecraft:zombie_head 1 1000 500
 infuse minecraft:zombie_head minecraft:creeper_head 1 5000 1000
+# The Blook: `data/evilcraft/recipe/blood_infuser/base/blook.json`, the jar's own recipe (a
+# Book and 500 mB for a Blook in 500 ticks at tier 1). It is also the recipe whose keys this
+# package has to resolve: its product is an item the package itself registers.
+infuse minecraft:book evilcraft:blook 1 500 500
 
 echo "== M: the container slot empties a filled extractor into the tank =="
 say "evilcraft blood $IX 101 0 0"
@@ -1194,8 +1308,11 @@ ctl wait 8 >/dev/null
 # An AI target: a frozen mob never takes a projectile's damage at this pin.
 ctl command "execute in minecraft:the_end run summon minecraft:zombie 206.5 101 10.5" >/dev/null
 ctl wait 6 >/dev/null
-ZOMBIES=$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')
-[ "$ZOMBIES" = 1 ] || fail "the arena holds $ZOMBIES zombies, expected 1: $(ctl entities 20 | jq -c '.entities[0:3]')"
+# A 30-block radius: the player stands at z=-8.5 and the target is summoned at z=10.5, which is
+# 19.9 blocks away — inside a 20-block query only if the wandering zombie happens to stay put
+# (measured 2026-11-23: the count read 0 and the run stopped here).
+ZOMBIES=$(ctl entities 30 minecraft:zombie | jq -r '.entities | length')
+[ "$ZOMBIES" = 1 ] || fail "the arena holds $ZOMBIES zombies, expected 1: $(ctl entities 30 | jq -c '.entities[0:3]')"
 # An AI zombie is the target because a frozen one takes no projectile damage, and an AI zombie
 # wanders: its cell is pinned just before the arrow is sent, so the straight flight along z=10.5
 # meets it (measured once on 2026-11-23: a free zombie had walked out of the arrow's line).
@@ -1216,10 +1333,10 @@ ctl command "data merge entity @e[type=minecraft:arrow,limit=1] {Motion:[-2.0,0.
     || fail "the skeleton's arrow does not fly"
 for _ in $(seq 1 20); do
     ctl wait 4 >/dev/null
-    [ "$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')" = 0 ] && break
+    [ "$(ctl entities 30 minecraft:zombie | jq -r '.entities | length')" = 0 ] && break
 done
-[ "$(ctl entities 20 minecraft:zombie | jq -r '.entities | length')" = 0 ] \
-    || fail "the skeleton's arrow did not kill the zombie: $(ctl entities 20 | jq -c '.entities[0:3]')"
+[ "$(ctl entities 30 minecraft:zombie | jq -r '.entities | length')" = 0 ] \
+    || fail "the skeleton's arrow did not kill the zombie: $(ctl entities 30 | jq -c '.entities[0:3]')"
 ctl wait 6 >/dev/null
 held_blood "skeleton-arrow"
 [ "$HELD_BLOOD" = 0 ] \
@@ -1806,4 +1923,181 @@ darktank "$DTX" "$DTY" "$DTZ"
 [ "$CAPACITY" = "$DARK_TANK_CAPACITY" ] || fail "the placed dark tank reports a $CAPACITY mB tank"
 echo "  the dark tank broke into itself carrying $DT_CARRIED mB of $fluid, and places back at $TANK/$CAPACITY mB"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB"
+echo "== AF: a cursed tool goes into the Purifier's purge slot by a click =="
+# `BlockPurifier.useItemOn` puts the held item into `SLOT_PURIFY` one at a time, and
+# `ToolBadEnchantPurifyAction.canWork` reads `DataComponents.ENCHANTMENTS` on it. The pickaxe
+# is the game's own: a `/give` with one `minecraft:vanishing_curse` on it.
+PUX=$((X0 + 6))
+PUY=101
+PUZ=-10
+ctl command "execute in minecraft:the_end run setblock $PUX 101 $PUZ minecraft:air" >/dev/null 2>&1 || true
+ctl command "clear @s" >/dev/null
+ctl wait 4 >/dev/null
+place_chest "$PUX" "$PUY" "$PUZ" "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$TANK" = 0 ] || fail "a fresh purifier reads $TANK mB, expected 0"
+[ "$CAPACITY" = "$PURIFIER_TANK" ] \
+    || fail "the purifier reports a $CAPACITY mB tank, expected $PURIFIER_TANK"
+[ "$PURGE_ITEM" = empty ] || fail "a fresh purifier's purge slot holds $PURGE_ITEM, expected empty"
+echo "  a fresh $PURIFIER at $PUX,101,$PUZ reads $TANK/$CAPACITY mB, purge $PURGE_ITEM"
+ctl command "item replace entity @s hotbar.0 with $CURSED_PICKAXE 1" >/dev/null
+ctl wait 6 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+[ "$(ctl inventory | jq -r '.held.item')" = "minecraft:diamond_pickaxe" ] \
+    || fail "the cursed pickaxe is not in hand: '$(ctl inventory | jq -r '.held.item')'"
+ctl command "execute in minecraft:the_end run tp @s $((PUX - 2)).5 101 $PUZ.5" >/dev/null
+ctl wait 6 >/dev/null
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = "minecraft:diamond_pickaxe" ] \
+    || fail "the click put $PURGE_ITEM in the purge slot, expected the pickaxe"
+[ "$PURGE_COUNT" = 1 ] || fail "the purge slot holds $PURGE_COUNT pickaxes, expected one"
+[ "$ENCH" = 1 ] || fail "the purge slot's pickaxe carries $ENCH enchantment(s), expected 1"
+[ "$CURSES" = 1 ] || fail "the purge slot's pickaxe carries $CURSES curse(s), expected 1"
+[ "$TANK" = 0 ] || fail "the click moved $TANK mB into the tank, expected nothing (it was empty)"
+saved_item "$PUX" "$PUY" "$PUZ" 0
+case "$SAVED_ITEM" in
+    *minecraft:enchantments*minecraft:vanishing_curse*)
+        echo "  the saved pickaxe carries the curse" >&2 ;;
+    *) fail "the purge slot's saved item does not carry the curse: '$SAVED_ITEM'" ;;
+esac
+
+echo "== AG: sixty ticks of the action strip the curse for exactly one bucket =="
+# `ToolBadEnchantPurifyAction.PURIFY_DURATION` = 60 ticks for a level-1 curse, and the
+# completed action takes `setBuckets(getBucketsFloored() - 1, rest)`: one bucket, 1,000 mB.
+say "evilcraft blood $PUX $PUY $PUZ $PURIFIER_TANK"
+ctl wait 12 >/dev/null
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$TANK" = "$PURIFIER_TANK" ] \
+    || fail "the harness left the purifier at $TANK mB, expected $PURIFIER_TANK"
+ctl wait 140 >/dev/null
+purifier "$PUX" "$PUY" "$PUZ"
+PURIFIED_TANK=$TANK
+PURIFIED_ENCH=$ENCH
+PURIFIED_CURSES=$CURSES
+PURIFIED_ITEM=$PURGE_ITEM
+saved_item "$PUX" "$PUY" "$PUZ" 0
+if [ "$SELFTEST" = purifier ]; then
+    echo "(selftest=purifier: asserting the curse is still on the tool)"
+    PURIFIED_ENCH=1
+    PURIFIED_CURSES=1
+fi
+[ "$PURIFIED_CURSES" = 0 ] \
+    || fail "the pickaxe still carries $PURIFIED_CURSES curse(s) after 140 ticks, expected none"
+[ "$PURIFIED_ENCH" = 0 ] \
+    || fail "the pickaxe still carries $PURIFIED_ENCH enchantment(s) after 140 ticks, expected none"
+case "$SAVED_ITEM" in
+    *minecraft:enchantments*)
+        [ "$SELFTEST" = purifier ] \
+            || fail "the purge slot's saved item still carries minecraft:enchantments: '$SAVED_ITEM'" ;;
+    *)
+        [ "$SELFTEST" != purifier ] \
+            || fail "the saved item carries no minecraft:enchantments to keep: '$SAVED_ITEM'" ;;
+esac
+[ "$PURIFIED_TANK" = $((PURIFIER_TANK - 1000)) ] \
+    || fail "the tank is $PURIFIED_TANK mB after one curse, expected $((PURIFIER_TANK - 1000))"
+[ "$PURIFIED_ITEM" = "minecraft:diamond_pickaxe" ] \
+    || fail "the pickaxe left the purge slot ($PURIFIED_ITEM), the action strips and keeps nothing"
+echo "  the curse is gone from the saved pickaxe and the tank fell $PURIFIER_TANK -> $PURIFIED_TANK mB (one bucket)"
+# The empty hand takes it back out (`BlockPurifier.useWithoutItem`'s `isEmpty()` branch). AF's
+# insert left the hand empty, so this is the same click a player makes on a loaded machine.
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = empty ] || fail "the empty-hand click left $PURGE_ITEM in the purge slot"
+[ "$(ctl inventory | jq -r '.counts["minecraft:diamond_pickaxe"] // 0')" -ge 1 ] \
+    || fail "the purified pickaxe did not come back to the hand: $(ctl inventory | jq -c '.counts')"
+echo "  the empty hand took the purified pickaxe back out of the purge slot"
+
+echo "== AH: the same cursed pickaxe in a Blood Chest keeps its curse (the differential) =="
+# The purifier's effect is that machine's own rule (`ToolBadEnchantPurifyAction`): the same
+# item, the same 140 ticks and a working Blood Chest touch no enchantment at all —
+# `RepairItemTickAction` writes damage, and an undamaged tool is not even taken.
+DCHX=$((X0 + 6))
+# Two cells north of the purifier, and **not** the arena's edge: `open_menu` stands the player
+# at `$z.5`, which for a negative z is the cell *south* of the block, and beyond the arena's
+# floor there is nothing to stand on (measured 2026-11-23: the player fell and the click missed).
+DCHZ=$((PUZ - 2))
+ctl command "clear @s" >/dev/null
+ctl command "execute in minecraft:the_end run setblock $DCHX 101 $DCHZ $CHEST" >/dev/null
+ctl wait 10 >/dev/null
+say "evilcraft blood $DCHX 101 $DCHZ 1000"
+ctl wait 10 >/dev/null
+ctl command "item replace entity @s hotbar.0 with $CURSED_PICKAXE 1" >/dev/null
+ctl wait 6 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+open_menu "$DCHX" 101 "$DCHZ" 11
+put_in_slot 300 minecraft:diamond_pickaxe
+ctl close >/dev/null 2>&1 || true
+ctl wait 12 >/dev/null
+info "$DCHX" 101 "$DCHZ"
+[ "${SLOT0_ITEM:-}" = "minecraft:diamond_pickaxe" ] \
+    || fail "the chest's slot 0 holds ${SLOT0_ITEM:-nothing}, expected the cursed pickaxe"
+DCH_TANK=$TANK
+ctl wait 140 >/dev/null
+info "$DCHX" 101 "$DCHZ"
+saved_item "$DCHX" 101 "$DCHZ" 0
+case "$SAVED_ITEM" in
+    *minecraft:enchantments*minecraft:vanishing_curse*)
+        echo "  a Blood Chest for 140 ticks: the pickaxe still carries the curse" >&2 ;;
+    *) fail "the Blood Chest stripped the curse too ('$SAVED_ITEM'), so the purifier's result proves nothing" ;;
+esac
+[ "$TANK" = "$DCH_TANK" ] \
+    || fail "the chest spent $((DCH_TANK - TANK)) mB on an undamaged tool"
+
+echo "== AI: a standing extractor click loads the slot, the empty hand takes it back, the crouch pours =="
+# The blood route: a crouching click with a filled extractor (upstream's `FluidUtil` branch,
+# with this port's container and gesture). A **standing** click puts the extractor in the slot
+# instead and pours nothing, which is the gesture's differential; the empty hand then takes it
+# back with its blood intact, and the crouching click pours exactly the room the tank has.
+ctl command "execute in minecraft:the_end run tp @s $((PUX - 2)).5 101 $PUZ.5" >/dev/null
+ctl wait 6 >/dev/null
+empty_hand
+ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+ctl wait 6 >/dev/null
+ctl select 9 >/dev/null
+ctl wait 4 >/dev/null
+say "evilcraft held 5000"
+ctl wait 10 >/dev/null
+held_blood "before the pour"
+[ "$HELD_BLOOD" = 5000 ] || fail "the extractor holds $HELD_BLOOD mB, expected the 5,000 the command set"
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$TANK" = "$PURIFIED_TANK" ] \
+    || fail "a standing click with the extractor poured $TANK mB, expected the tank to stay at $PURIFIED_TANK"
+[ "$PURGE_ITEM" = "$EXTRACTOR" ] \
+    || fail "the standing click put $PURGE_ITEM in the purge slot, expected the extractor"
+echo "  standing: the extractor went into the purge slot and the tank stayed at $TANK mB"
+# The insert emptied the hand, so the same click takes it straight back out.
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = empty ] || fail "the extractor did not come back out ($PURGE_ITEM)"
+held_blood "the extractor back in hand"
+[ "$HELD_BLOOD" = 5000 ] || fail "the extractor holds $HELD_BLOOD mB after the round trip, expected 5,000"
+# A fresh extractor from the command, as phase AC pours with: a click that follows the machine's
+# own write to the player's hand carries the *client's* older stack there (measured 2026-11-23:
+# the same crouching click poured 0 mB straight after the take-back), and this phase measures the
+# pour, not the client's inventory prediction.
+ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+ctl wait 6 >/dev/null
+ctl select 9 >/dev/null
+ctl wait 4 >/dev/null
+say "evilcraft held 5000"
+ctl wait 10 >/dev/null
+held_blood "before the crouching pour"
+[ "$HELD_BLOOD" = 5000 ] || fail "the extractor holds $HELD_BLOOD mB before the pour, expected 5,000"
+crouch_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+POURED=$((TANK - PURIFIED_TANK))
+held_blood "after the crouching pour"
+[ "$POURED" = 1000 ] \
+    || fail "the crouching click poured $POURED mB, expected the 1,000 mB room the $PURIFIED_TANK mB tank had"
+[ "$TANK" = "$PURIFIER_TANK" ] || fail "the tank is $TANK mB, expected $PURIFIER_TANK"
+[ "$HELD_BLOOD" = 4000 ] \
+    || fail "the extractor holds $HELD_BLOOD mB after the pour, expected the 4,000 that did not fit"
+saved_tank "$PUX" "$PUY" "$PUZ"
+[ "$SAVED_MB" = "$PURIFIER_TANK" ] || fail "the purifier's saved tank is $SAVED_MB mB"
+echo "  extractor 5000 -> $HELD_BLOOD mB, purifier tank $PURIFIED_TANK -> $TANK mB (the 1,000 mB room, the rest kept)"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), and the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks"

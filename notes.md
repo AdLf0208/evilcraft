@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank; the Purifier is `blocked(no-purifier-action-table)`)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook; three of the purifier's four actions stay blocked)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -2015,8 +2015,310 @@ the port's cube keeps that (`cube_bottom_top` with `bottom` = `dark_tank_up`).
 | the auto-supply toggle, the downward/held auto-fill, the item tooltip, the light emission | not ported | deviations 1, 3 (the container item capability the pin lacks) |
 | the fluid-rendering model and the 14/16 shape/outline | not ported | deviation 2 (no block-entity renderer at this tier's shape) |
 | the jar's `dark_tank` recipe and its three `special/` recipes | not ported | gap 1 (`dark_gem` not carried; crafting-special not expressible) |
-| the purifier (`BlockPurifier` + `BlockEntityPurifier`) | **blocked(no-purifier-action-table)** | the four `IPurifierAction` classes; needs `evilcraft:blook`, the potion entity query and the head progression (see the top of this section) |
+| the purifier (`BlockPurifier` + `BlockEntityPurifier`) | **carried by slice 9** | the curse action, the blook and the two clicks; the other three actions are `blocked(…)` rows in slice 9's coverage table |
 
 ### Skills
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices
+
+## Slice 9 — the Blook, and the Purifier's curse action (`ToolBadEnchantPurifyAction`) (2026-11-23)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.9**.
+The registry entry, the PR (#1680, retained: the publisher appends to it) and the ledger stay the
+orchestrator's.
+
+### The two steps, and why this family
+
+Slice 8's row, verbatim:
+
+> | the purifier (`BlockPurifier` + `BlockEntityPurifier`) | **blocked(no-purifier-action-table)** | the four
+> `IPurifierAction` classes; needs `evilcraft:blook`, the potion entity query and the head progression |
+
+The brief splits that row: **first** carry `evilcraft:blook` (the item, its model and texture, and
+its own infusion recipe), because it is what the disenchant action binds to and the one piece the
+package lacked; **then** carry the purifier with the single action of the four that is
+self-contained, `ToolBadEnchantPurifyAction` — the curse remover. The other three stay named rows
+below: `DisenchantPurifyAction` needs the blook **and** a full tank plus a random enchantment
+generator over the item's component, `CollectPotionPurifyAction` needs a living-entity query in the
+block's AABB, and `MobHeadDowngradePurifyAction` needs the Blood Infuser's head progression.
+
+**Tier:** `deep` still governs the port; this slice is a `machines` family inside it — a block
+entity with two slots and a three-bucket tank, a content menu (none: upstream has no GUI), a tick,
+an action clock, and two click paths. No entity, renderer or dimension.
+
+### Upstream source read (analysis only, not copied)
+
+`ports/_shared/upstream/evilcraft`, tag `1.21.1-1.2.100`, commit `aa81220`:
+
+- `block/BlockPurifier.java`, `block/BlockPurifierConfig.java`
+- `blockentity/BlockEntityPurifier.java`, `BlockEntityPurifierConfig.java`
+- `blockentity/tickaction/purifier/{PurifierActionRegistry,ToolBadEnchantPurifyAction,DisenchantPurifyAction,CollectPotionPurifyAction,MobHeadDowngradePurifyAction}.java`
+- `item/ItemBlookConfig.java`
+- plus the jar's own `assets/evilcraft/{blockstates,models,textures}/…purifier…`, `…blook…`,
+  `data/evilcraft/recipe/blood_infuser/base/blook.json`, `data/evilcraft/loot_table/blocks/purifier.json`,
+  `data/minecraft/tags/block/mineable/pickaxe.json` and the lang keys.
+
+The rule as the files state it: the registry is a **list of four actions** (`canWork` returns the
+first index that applies, `work(i)` runs it); `ToolBadEnchantPurifyAction` takes any item in
+`SLOT_PURIFY` carrying a `#minecraft:curse` enchantment, needs `getBucketsFloored() > 0`, counts to
+`PURIFY_DURATION = 60`, and then sets each curse's level to `level - 1` and calls
+`setBuckets(getBucketsFloored() - 1, getBucketsRest())` — **one bucket (1,000 mB) per curse**. The
+block entity is `SLOTS = 2` (`SLOT_PURIFY = 0`, `SLOT_ADDITIONAL = 1`) with
+`MAX_BUCKETS = 3`, and the block has **no menu**: `BlockPurifier.useItemOn` fills the slot from the
+held item, `useWithoutItem` hands it back, and `FluidUtil` fills the tank from a blood container.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Blook | `evilcraft:blook` (item, model, item model, the jar's own texture, lang, creative row) and its infusion `minecraft:book` → blook for 500 mB in 500 ticks at tier 1 | `ItemBlookConfig`, the jar's `base/blook.json` |
+| Block | `evilcraft:purifier` — template `minecraft:stone` (`requires_tool`, `hardness`/resistance 2.5, `SoundType.STONE`), the jar's `minecraft:mineable/pickaxe` entry, its loot table, the three textures on a cube | `BlockPurifierConfig`, the jar's files |
+| Block entity | two slots and a **3,000 mB** tank, one saved `fluids` list | `BlockEntityPurifier.SLOTS`/`MAX_BUCKETS` |
+| Click in | a standing right-click puts **one** item (components and damage included) into `SLOT_PURIFY` when it is empty, taking it from the hand | `BlockPurifier.useItemOn` |
+| Click out | an empty-hand right-click hands the purge slot's stack back, then the additional slot's | the same, `isEmpty()` branches |
+| Blood in | a **crouching** click with a filled Blood Extractor pours into the tank, keeping what does not fit | `FluidUtil.interactWithFluidHandler`, this port's gesture (the dark tank's) |
+| Action | `runtime::purify_tick` + `runtime::purified`: 60 ticks, every curse loses one level, one bucket each, `canWork` refusing with no curse or under one bucket | `ToolBadEnchantPurifyAction` |
+| Tank drop | a broken purifier's own item carries its tank (`copy_tank_data`'s route, slice 3) | the jar's loot table + `tank::Machine::Purifier` |
+| Command | `/evilcraft purifier <pos>` (tank, both slots, `ench`, `curses`, `tick`), and `blood`/`load` reaching the machine | harness only (upstream has none) |
+
+`runtime.rs` holds the rules (`PURIFIER`, `PURIFIER_TANK`, `PURIFY_DURATION`, `CURSES`,
+`is_curse`, `purify_tick`, `purified`), `src/purifier.rs` the game side, and the tank's capacity is
+in `tank::Machine::Purifier.capacity()`.
+
+### TDD: the red proof, before the implementation
+
+The four rules were stubbed (`is_curse` → `false`, `purify_tick` → `None`, `purified` → unchanged,
+no curses) and their tests written; `sdk-test-red-slice9.log`:
+
+```
+test result: FAILED. 66 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_clean_stack_or_a_tank_under_one_bucket_never_works stdout ----
+thread '…' panicked at src/runtime.rs:1407:9:
+assertion `left == right` failed
+  left: None
+ right: Some((11, false))
+
+---- runtime::tests::a_curse_takes_sixty_ticks_and_one_bucket_of_blood stdout ----
+thread '…' panicked at src/runtime.rs:1392:9:
+assertion `left == right` failed
+  left: None
+ right: Some((1, false))
+
+---- runtime::tests::a_finished_purify_strips_one_level_of_every_curse_and_keeps_the_rest stdout ----
+thread '…' panicked at src/runtime.rs:1418:9:
+assertion `left == right` failed
+  left: [("minecraft:vanishing_curse", 1), ("minecraft:sharpness", 3)]
+ right: [("minecraft:sharpness", 3)]
+
+---- runtime::tests::only_vanillas_two_curses_are_curses stdout ----
+thread '…' panicked at src/runtime.rs:1439:9:
+assertion failed: is_curse("minecraft:vanishing_curse")
+```
+
+The two data tests (`a_book_becomes_a_blook_for_five_hundred_mb` and
+`every_carried_recipe_names_items_this_package_or_the_game_has`) pass against the delivered data —
+they are the *keys resolve* gate the brief asks for: every carried infusion's input and product is
+`minecraft:` or one of `runtime::CARRIED_ITEMS` (the extractor, the blook, the three promises), so
+no recipe can name an id nobody registers.
+
+Green: `sdk-test.log` — **71 passed, 0 failed** (63 before + 8), `sdk-clippy.log` — `cargo fmt
+--check` clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 4/70** (66 passed, 4 failed) (`EXIT:101`) | `sdk-test-red-slice9.log` |
+| tests (green) | `cargo test` | **71 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 558 API uses, **18 hooks**, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **221,406 B**, sha256 `e1266a7f…1568f`, `CMP-IDENTICAL`, 113 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91…` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8ac…` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (71 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 16 recipe/loot files: slice 1's one unverified `"rolls": 1.0`; **the new purifier table and the blook recipe `ok`** | job report |
+| artifact record | `sdk-artifact-0.2.9.txt` | bytes/sha/entries/manifest, each packed `src/` file's sha, check and fits lines, the packed tree | `sdk-artifact-0.2.9.txt` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-a1c6103432dc`, log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/`, `assets/` and `horizon-mod.toml` are
+byte-identical to the port (`diff -r`/`cmp` empty, `version = "0.2.9"`, `sdk-export-check-0.2.9.log`).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** (A, A2, B–F, H–W, Y, Z, AA, AB, AC, AD, AE, **AF–AI**) | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=purifier` | **`FAIL` + `EXIT:1`** at AG (*the pickaxe still carries 1 curse(s) after 140 ticks*) | `e2e-launcher-selftest-purifier.log` |
+| selftest (slices 2–8, history) | `SELFTEST=infuser|tank|blood|stain|fall|colossal|darktank` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=11 ok=11 missing-exit=0
+bad-exit=0` (exit 0): the ten earlier legs stay green and the eleventh is this slice's.
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== AF: a cursed tool goes into the Purifier's purge slot by a click ==
+  Purifier [206, 101, -10]: tank 0/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=12270
+  a fresh evilcraft:purifier at 206,101,-10 reads 0/3000 mB, purge empty
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 0/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 1, curses 1, tick 0, t=12340
+  206, 101, -10 has the following block data: {components: {"minecraft:enchantments": {"minecraft:vanishing_curse": 1}}, count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}
+  the saved pickaxe carries the curse
+== AG: sixty ticks of the action strip the curse for exactly one bucket ==
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 1, curses 1, tick 18, t=12382
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 0, curses 0, tick 0, t=12536
+  206, 101, -10 has the following block data: {count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}
+  the curse is gone from the saved pickaxe and the tank fell 3000 -> 2000 mB (one bucket)
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=12588
+  the empty hand took the purified pickaxe back out of the purge slot
+== AH: the same cursed pickaxe in a Blood Chest keeps its curse (the differential) ==
+  Blood Chest [206, 101, -12]: tank 1000/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0], t=12704
+  Blood Chest [206, 101, -12]: tank 1000/10000 mB, container empty@0, slots [0:minecraft:diamond_pickaxe@0], t=12864
+  206, 101, -12 has the following block data: {components: {"minecraft:enchantments": {"minecraft:vanishing_curse": 1}}, count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}
+  a Blood Chest for 140 ticks: the pickaxe still carries the curse
+== AI: a standing extractor click loads the slot, the empty hand takes it back, the crouch pours ==
+  Blood Extractor held: 5000/5000 mB, t=12972.
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge evilcraft:blood_extractor@1, add empty@0, ench 0, curses 0, tick 0, t=13010
+  standing: the extractor went into the purge slot and the tank stayed at 2000 mB
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=13048
+  Blood Extractor held: 5000/5000 mB, t=13060.
+  Blood Extractor held: 5000/5000 mB, t=13108.
+  crouch + right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=13158
+  Blood Extractor held: 4000/5000 mB, t=13170.
+  206, 101, -10 has the following block data: 3000
+  extractor 5000 -> 4000 mB, purifier tank 2000 -> 3000 mB (the 1,000 mB room, the rest kept)
+```
+
+and, in the same run's phase L: `minecraft:book -> evilcraft:blook x1 for 500 mB in 500 ticks` /
+`took 1 x evilcraft:blook out of the result slot into inventory slot 10` — the blook is crafted
+through the Blood Infuser with the jar's own recipe, which is also what proves its keys resolve.
+
+**Fail-capable, four ways.** (1) `SELFTEST=purifier` inverts AG's curse-gone assertion and exits 1
+(log above). (2) AH is the differential: the *same* cursed pickaxe, the same 140 ticks and a
+working Blood Chest leave the curse on the item — read from the chest's own saved `Items[0]` — and
+spend nothing, so AG's result can only be the purifier's action. (3) AF is AG's positive control:
+the same pickaxe's saved stack carries `minecraft:enchantments` *before* the action, so "no
+enchantments" afterwards is not a stack that never had one. (4) The whole-package control leaves
+every id unknown, so AF cannot even place the purifier.
+
+### What the game measured, and the four API/harness facts it cost
+
+1. **26.3's `minecraft:enchantments` component is the bare map.** The 1.21.1 shape
+   `{levels: {"minecraft:vanishing_curse": 1}}` is **refused by this build's `/give`**:
+   *"Malformed 'minecraft:enchantments' component: 'Not a number; Failed to get element
+   minecraft:levels from registry minecraft:enchantment'"*. The accepted and written shape is
+   `{"minecraft:vanishing_curse": 1}` (`horizon-items`' `levels_tag` writes it and its
+   `read_levels` still *reads* the old wrapper). The brief's assertion syntax uses the old shape;
+   the artefact wins, and this port reads both and writes 26.3's.
+2. **SNBT's unquoted keys may not contain a colon** (`Reader::is_allowed_in_unquoted`), so an
+   enchantment id inside a component is written `{"minecraft:vanishing_curse":1}`, never
+   `{minecraft:vanishing_curse:1}`.
+3. **A right-click reaches `use_item_on` twice, and the second one is the off hand.** This hook is
+   server-only, so the clicking client cannot predict it: its main-hand attempt passes and it sends
+   a second click for the off hand, which took the item straight back out of the slot the first
+   click had filled (measured: `use_item_on held=minecraft:diamond_pickaxe hand=Main` then
+   `use_item_on held=none hand=Off` in the same tick). The block Part therefore answers for
+   `Hand::Main` only.
+4. **`None` from `use_item_on` means `TRY_WITH_EMPTY_HAND`, not `Pass`.** A refused insert that
+   answered `None` made the engine run `use_without_item`, which handed the *occupant* of the slot
+   into the player's hand, overwriting what they held. A held-item click this machine declines must
+   answer `Some(Pass)`.
+5. **A crouching right-click reaches an item Part, not a block Part.** The purifier's pour worked
+   only once it moved to an `ItemPart` on the extractor, as the stain's draw and the dark tank's
+   fill already were: a crouching click ran **no** block hook at all (measured: the pour's probe
+   printed nothing while the item Part's printed `crouching=true blood=5000`).
+6. **An item Part that declines must answer `None`, not `Pass`.** The first Part to answer wins,
+   so the purifier's `Pass` stopped the stain's Part from drawing (phase S went red until it
+   returned `None`).
+
+Three harness facts learned here too:
+
+1. **`clear @s` leaves the clicking client's held stack stale**, and a right-click with a stale
+   stack sends no use packet at all: `empty_hand` clears, then selects another hotbar slot, and
+   fails if the hand still reads occupied.
+2. **A click that follows the machine's own write to the player's hand carries the client's older
+   stack** (the same crouching click poured 0 mB straight after the take-back), so a pour is
+   measured with an extractor the command gave, as phase AC does.
+3. **`open_menu` stands the player at `$z.5`, which for a negative `z` is the cell *south* of the
+   block** — a chest on the arena's edge (z = -14) put the player in the void, and the click missed.
+   The differential chest sits two cells from the purifier for that reason.
+4. Two pre-existing flakes were made deterministic in the shared helpers: `place_chest` now clears
+   non-player entities within 8 blocks (an End enderman in the cell refuses the placement) and
+   retries the click three times before falling back to a plain right-click (a dropped click reads
+   as "the block did not change"); the arena floor runs six cells west of X0, because
+   `break_survival` stands at `x - 3` and the Colossal Blood Chest's breaks were made from outside
+   it; and phase R counts zombies within 30 blocks, since its target is summoned 19.9 blocks from
+   where the player stands.
+
+### Deviations this slice adds
+
+1. **No menu, and no per-slot filter.** Upstream's purifier has no GUI — the click is its whole
+   interface — and the pin's content container has no per-slot placement rule, so the purge slot
+   takes one item of any kind and the machine only *acts* on a cursed one. Upstream's registry
+   answers `isItemValidForMainSlot` for any item too (through `DisenchantPurifyAction.isAllowed`),
+   so no player is blocked; what is missing is the disenchant *effect* (row below).
+2. **The additional slot is never filled by a click.** Only the three actions this package does not
+   carry accept an item there (a Blook, a glass bottle, a head), so the slot exists (upstream's
+   `SLOTS = 2`) and the readout prints it, but nothing puts anything in it except `/evilcraft load`.
+3. **The gestures are the port's.** Blood goes in by a crouching extractor click (the dark tank's
+   and the stain's container gesture, since this pin's capability items carry water and lava only),
+   and the item goes in and out by a standing click. Upstream hands the tank to `FluidUtil` on any
+   right-click with a fluid container.
+4. **The block is a cube over the jar's textures**, not upstream's cauldron-shaped model and
+   outline: a content block cannot declare per-state shapes without a state property, and a
+   cauldron *template* would bring the cauldron's own water interactions with it.
+5. **The curses are the two vanilla ids, named as constants.** `EnchantmentTags.CURSE` is a
+   `#minecraft:curse` enchantment tag, and the pin's tag reads cover the block, item and fluid
+   registries only (`Tags`), so a data pack that tags another enchantment as a curse is not heard.
+   `horizon-mod-vocab`'s `ItemEnchantments` is the `get_enchantment_level` event's mutable view, not
+   a component reader, so the component is read as the compound it is.
+6. **The item's component is read from its own patch.** An enchantment that lived in an *item
+   default* rather than the stack's patch would not be seen — no vanilla tool ships one, and the
+   purifier's whole input is a `/give`n or found stack.
+7. **No particles, no action-bar readout, no comparator signal.** `showEffect`/`showEnchantedEffect`,
+   the `enabled` toggle and `getAnalogOutputSignal` are client or redstone surfaces this port does
+   not carry for any machine.
+
+### Upstream defects fixed
+
+None new. (The shadowed leather recipe, the 25,000 mB recipe, the missing pickaxe tag and
+`copy_tank_data`'s applier are the earlier slices'.) One thing recorded rather than "fixed": the
+purifier's registry comment in `BlockPurifierConfig` says the enchantment blacklist disqualifies
+curses from purification, and it is empty by default — the port carries no blacklist, which is the
+same behaviour with the shipped defaults.
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `evilcraft:blook` item, model, item model, texture, lang, creative row | **tested** | L: crafted in the Blood Infuser and taken out of the result slot |
+| the blook's own infusion (`base/blook.json`: book → blook, 500 mB, 500 ticks, tier 1) | **tested** | L (`minecraft:book -> evilcraft:blook x1 for 500 mB in 500 ticks`) + the unit `a_book_becomes_a_blook_for_five_hundred_mb` |
+| every carried recipe's keys resolve to an item the game or this package registers | **tested** | unit `every_carried_recipe_names_items_this_package_or_the_game_has`; in game, `recipes 10/10` in force and the blook crafted |
+| `purifier` block, item, blockstate, model, textures, lang, creative row, loot table, `minecraft:mineable/pickaxe` | **tested** | AF places it from its own item (`ctl place`) and reads it back at `0/3000 mB` |
+| the two slots and the **3,000 mB** tank | **tested** | AF/AG/AI readouts (`0/3000`, `3000/3000`, `2000/3000`); `/data get block … fluids` reads 3000 |
+| a standing click puts one item in the empty purge slot, components included | **tested** | AF: the cursed pickaxe, its saved `Items[0]` carrying `minecraft:vanishing_curse`; AI: a filled extractor |
+| an empty-hand click hands the item back | **tested** | AG: `purge empty@0` and the pickaxe back in the hand; AI: the extractor with its 5,000 mB intact |
+| `ToolBadEnchantPurifyAction` — 60 ticks, one level per curse, one bucket each | **tested** | AG: curse gone, tank 3,000 → 2,000; the unit `a_curse_takes_sixty_ticks_and_one_bucket_of_blood` |
+| a level-2 curse loses one level and stays | **tested (unit)** | `a_finished_purify_strips_one_level_of_every_curse_and_keeps_the_rest` |
+| `canWork`: no curse, or under one bucket, does nothing | **tested (unit)** | `a_clean_stack_or_a_tank_under_one_bucket_never_works` |
+| the tank filled by a crouching extractor click, keeping the rest | **tested** | AI: 2,000 → 3,000, extractor 5,000 → 4,000, `/data get block … fluids` 3000 |
+| `copy_tank_data` on the purifier (the tank in the dropped block) | **tested (unit)** | `tank::tests::a_purifier_carries_its_three_buckets`; the in-game route is the two machines' and the dark tank's (O/P/AE) |
+| `DisenchantPurifyAction` (a Blook in the additional slot, full tank, one enchantment moved) | **blocked(no-disenchant-generator)** | needs the blook (now carried) **and** the random-enchantment generator over `DataComponents.ENCHANTMENTS` plus a full-tank gate; not expressible as this port's single action |
+| `CollectPotionPurifyAction` (a glass bottle and a living entity in the block's AABB) | **blocked(no-entity-aabb-query)** | the pin's `living` helpers carry no "entities in a box" query in a block tick |
+| `MobHeadDowngradePurifyAction` (the head progression, full tank) | **blocked(no-head-progression)** | meaningful only with the Blood Infuser's head recipes this package does not carry |
+| `ItemVengeancePickaxe` immunity | not ported | the item is not carried, so no stack can match it |
+| the `enchantmentIdBlacklist` config | not ported | empty upstream by default; no config surface in a content mod |
+| particles, action bar, comparator signal | not ported | deviations 7 |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port

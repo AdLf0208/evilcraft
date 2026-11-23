@@ -21,6 +21,7 @@ pub mod blood;
 pub mod colossal;
 pub mod dark_tank;
 pub mod infuser;
+pub mod purifier;
 pub mod runtime;
 pub mod stain;
 pub mod tank;
@@ -72,6 +73,9 @@ impl Hooks for Mod {
         // one answers `Some` only for its own block and this one answers every click (with
         // `Pass`), and the first Part to answer wins.
         r.item_part(extractor, dark_tank::TankFill);
+        // The purifier's crouching pour rides the same item, before the stain's Part: that one
+        // answers `Pass` for every click and would end the chain.
+        r.item_part(extractor, purifier::Pour);
         r.item_part(extractor, stain::ExtractorDraw);
 
         // The Dark Tank: one sixteen-bucket tank with no slots and no menu. Its block is a
@@ -123,6 +127,21 @@ impl Hooks for Mod {
         r.block_container(&colossal, colossal::container());
         r.block_fluids(&colossal, colossal::tanks());
         tank::Machine::Colossal.register(r);
+
+        // The Purifier: its own block entity type and Part, two slots and a three-bucket
+        // tank, and the block Part that answers the two clicks (upstream's block has no
+        // GUI: the click is its whole interface). One of its four `IPurifierAction`s is
+        // carried — the curse removal — so its tick is that one action's rule.
+        let purifier = r.block_key(runtime::PURIFIER);
+        let kind = r
+            .block_entity_type(purifier::PURIFIER_ENTITY)
+            .blocks(&[purifier::PURIFIER_BLOCK])
+            .build();
+        r.block_entity_part(&kind, purifier::Purifier)
+            .expect("evilcraft declares the purifier's own block entity type");
+        r.block_container(&purifier, purifier::container());
+        r.block_fluids(&purifier, purifier::tanks());
+        tank::Machine::Purifier.register(r);
     }
 
     /// A broken Blood Chest or Blood Infuser drops its own item carrying the blood in its

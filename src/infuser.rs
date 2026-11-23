@@ -42,6 +42,12 @@ const PROGRESS: &str = "progress";
 /// ingredient and product are both items this package or the game has; the rest of the
 /// jar's 40 need items this slice does not carry (see the gap list in `notes.md`).
 pub const CARRIED: &[(&str, &str)] = &[
+    // `base/blook.json` is the jar's own path (the `base/` recipes are the machine's
+    // additions; the nine below are `convenience/` float, flattened when they were carried).
+    (
+        "evilcraft:blood_infuser/base/blook",
+        include_str!("../data/evilcraft/recipe/blood_infuser/base/blook.json"),
+    ),
     (
         "evilcraft:blood_infuser/minecraft_blaze_rod",
         include_str!("../data/evilcraft/recipe/blood_infuser/minecraft_blaze_rod.json"),

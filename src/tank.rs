@@ -33,7 +33,8 @@ const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
 // ---------------------------------------------------------------------------
 
 /// One of the machines whose own item carries its tank: `evilcraft:blood_chest`,
-/// `evilcraft:blood_infuser`, `evilcraft:colossal_blood_chest` and `evilcraft:dark_tank`.
+/// `evilcraft:blood_infuser`, `evilcraft:colossal_blood_chest`, `evilcraft:purifier` and
+/// `evilcraft:dark_tank`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Machine {
     /// The Blood Chest.
@@ -44,11 +45,19 @@ pub enum Machine {
     Colossal,
     /// The Dark Tank: a sixteen-bucket tank, not a machine with slots.
     DarkTank,
+    /// The Purifier: two slots and a three-bucket tank.
+    Purifier,
 }
 
 impl Machine {
     /// The machines, in registration order.
-    pub const ALL: [Self; 4] = [Self::Chest, Self::Infuser, Self::Colossal, Self::DarkTank];
+    pub const ALL: [Self; 5] = [
+        Self::Chest,
+        Self::Infuser,
+        Self::Colossal,
+        Self::DarkTank,
+        Self::Purifier,
+    ];
 
     /// The block. Its id is also the block entity type's registry id, which is the `id`
     /// `minecraft:block_entity_data` tags a payload with, and the id of the item it drops.
@@ -59,16 +68,19 @@ impl Machine {
             Self::Infuser => INFUSER,
             Self::Colossal => COLOSSAL,
             Self::DarkTank => DARK_TANK,
+            Self::Purifier => crate::runtime::PURIFIER,
         }
     }
 
     /// The size of this block's tank: the three machines hold ten buckets, the dark tank
-    /// sixteen (`BlockEntityDarkTank.BASE_CAPACITY`).
+    /// sixteen (`BlockEntityDarkTank.BASE_CAPACITY`) and the purifier three
+    /// (`BlockEntityPurifier.MAX_BUCKETS`).
     #[must_use]
     pub const fn capacity(self) -> i32 {
         match self {
             Self::Chest | Self::Infuser | Self::Colossal => TANK_CAPACITY,
             Self::DarkTank => crate::runtime::DARK_TANK_CAPACITY,
+            Self::Purifier => crate::runtime::PURIFIER_TANK,
         }
     }
 
@@ -78,10 +90,11 @@ impl Machine {
             Self::Infuser => 1,
             Self::Colossal => 2,
             Self::DarkTank => 3,
+            Self::Purifier => 4,
         }
     }
 
-    /// The machine a block id names, if it is one of the four.
+    /// The machine a block id names, if it is one of the five.
     #[must_use]
     fn of_block(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|machine| machine.id() == id)
@@ -103,7 +116,8 @@ impl Machine {
 }
 
 /// The machines' items, resolved once at registration.
-static ITEM: [std::sync::OnceLock<ItemKey>; 4] = [
+static ITEM: [std::sync::OnceLock<ItemKey>; 5] = [
+    std::sync::OnceLock::new(),
     std::sync::OnceLock::new(),
     std::sync::OnceLock::new(),
     std::sync::OnceLock::new(),
@@ -325,7 +339,24 @@ mod tests {
         assert_eq!(Machine::of_block(INFUSER), Some(Machine::Infuser));
         assert_eq!(Machine::of_block(COLOSSAL), Some(Machine::Colossal));
         assert_eq!(Machine::of_block(DARK_TANK), Some(Machine::DarkTank));
+        assert_eq!(
+            Machine::of_block(crate::runtime::PURIFIER),
+            Some(Machine::Purifier)
+        );
         assert_eq!(Machine::of_block("evilcraft:blood_extractor"), None);
         assert_eq!(Machine::of_block("minecraft:furnace"), None);
+    }
+
+    #[test]
+    fn a_purifier_carries_its_three_buckets() {
+        // `BlockEntityPurifier.MAX_BUCKETS` = 3, and the smaller tank is its own clamp.
+        assert_eq!(Machine::Purifier.capacity(), crate::runtime::PURIFIER_TANK);
+        let three = Machine::Purifier.capacity();
+        let patch = carried_patch(2_500, crate::runtime::PURIFIER, three).expect("a tank travels");
+        assert_eq!(tank_of(&patch, three), 2_500);
+        let doctored =
+            carried_patch(9_000, crate::runtime::PURIFIER, three).expect("a doctored tank travels");
+        assert_eq!(tank_of(&doctored, three), three);
+        assert_eq!(Machine::ALL.len(), 5);
     }
 }

@@ -1,0 +1,9 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "particle": "evilcraft:block/purifier_side",
+    "top": "evilcraft:block/purifier_top",
+    "bottom": "evilcraft:block/purifier_bottom",
+    "side": "evilcraft:block/purifier_side"
+  }
+}

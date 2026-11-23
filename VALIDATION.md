@@ -449,3 +449,65 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 10/10 logs end consistently.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 9 (0.2.9) — the Blook, and the Purifier's curse action (`ToolBadEnchantPurifyAction`)
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 9**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`. Every step ran through `ports/tools/build-slot.sh`
+(`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`).
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` with `is_curse`/`purify_tick`/`purified` stubbed | **FAILED 4/70** (66 passed, 4 failed) — *left: None / right: Some((11, false))*, *left: None / right: Some((1, false))*, *left: [("minecraft:vanishing_curse", 1), …] / right: [("minecraft:sharpness", 3)]*, *assertion failed: is_curse("minecraft:vanishing_curse")* | `sdk-test-red-slice9.log` |
+| tests (green) | `cargo test` | **71 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 558 API uses, 18 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **221,406 B** `e1266a7ffd974cbd488430c397e4d97248ac354bce596b63fd27c85c95c1568f`, `CMP-IDENTICAL`, 113 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check.log` |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91…` | exit 0 — `0a875da  made for` | `sdk-fits.log` |
+| fits (another build) | `… --build 0b14f8ac…` | exit 0 — `0b14f8a  fits` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** (71 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 16 recipe/loot files: slice 1's one unverified `"rolls": 1.0`; the new purifier table and the blook recipe `ok` | job report |
+| artifact record | `sdk-artifact-0.2.9.txt` | bytes/sha/entries/manifest, every packed `src/` file's sha, check and fits lines, the packed tree | `sdk-artifact-0.2.9.txt` |
+| export check | `diff -r`/`cmp` the launcher's export against the port | identical in `src/`, `data/`, `assets/` and the manifest, `version = "0.2.9"`, tag `native-0a875da-a1c6103432dc` | `sdk-export-check-0.2.9.log` |
+
+Launcher build: `native-0a875da-a1c6103432dc`, log line `Compiling evilcraft (1 of 1)`.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** — A, A2, B–F, H–W, Y, Z, AA, AB, AC, AD, AE, AF–AI | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=purifier` | **`FAIL` + `EXIT:1`** at AG — *the pickaxe still carries 1 curse(s) after 140 ticks, expected none* | `e2e-launcher-selftest-purifier.log` |
+| selftest (slices 2–8, history) | `SELFTEST=infuser|tank|blood|stain|fall|colossal|darktank` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=11 ok=11 missing-exit=0
+bad-exit=0` (exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- AF: a fresh `evilcraft:purifier` reads `0/3000 mB` with an empty purge slot; a **standing** click
+  with a `/give`n cursed diamond pickaxe puts exactly one in the slot, and the block entity's own
+  saved `Items[0]` reads
+  `{components: {"minecraft:enchantments": {"minecraft:vanishing_curse": 1}}, count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}`
+  — the positive control of AG's assertion.
+- AG: the tank at 3,000 and 140 ticks of the 60-tick action leave `ench 0 curses 0`, the tank at
+  **2,000** (one bucket) and the saved `Items[0]` as `{count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}`
+  — **no `minecraft:enchantments` at all**; the item stays in the slot. The empty-hand click then
+  hands it back.
+- AH: the *same* cursed pickaxe in a working Blood Chest for the same 140 ticks still carries
+  `minecraft:vanishing_curse` in its own saved stack and the chest spends nothing — the
+  differential.
+- AI: a standing click puts a filled extractor in the purge slot (tank unchanged, the gesture's
+  differential), the empty hand takes it back with its 5,000 mB intact, and the crouching click
+  pours exactly the 1,000 mB room the 2,000 mB tank had (the extractor keeping 4,000, the saved
+  `fluids` 3,000).
+- Phase L also crafts the Blook: `minecraft:book -> evilcraft:blook x1 for 500 mB in 500 ticks`,
+  taken out of the result slot — the blook's own jar recipe, and the proof that its keys resolve.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 11/11 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
