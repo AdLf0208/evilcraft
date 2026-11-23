@@ -20,7 +20,9 @@ use mod_api::{
     OnBlockPlacedByEvent, Registrar, ServerHost, Tag,
 };
 
-use crate::runtime::{CHEST, COLOSSAL, INFUSER, TANK_CAPACITY, carried_tank, restored_tank};
+use crate::runtime::{
+    CHEST, COLOSSAL, DARK_TANK, INFUSER, TANK_CAPACITY, carried_tank_with, restored_tank_with,
+};
 
 /// The vanilla component that moves a block entity's saved data on its item
 /// (`BlockEntity.applyComponentsFromItemStack`, `TypedEntityData.loadInto`).
@@ -30,8 +32,8 @@ const BLOCK_ENTITY_DATA: &str = "minecraft:block_entity_data";
 // The two machines
 // ---------------------------------------------------------------------------
 
-/// One of the three machines whose own item carries its tank: `evilcraft:blood_chest`,
-/// `evilcraft:blood_infuser` and `evilcraft:colossal_blood_chest`.
+/// One of the machines whose own item carries its tank: `evilcraft:blood_chest`,
+/// `evilcraft:blood_infuser`, `evilcraft:colossal_blood_chest` and `evilcraft:dark_tank`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Machine {
     /// The Blood Chest.
@@ -40,11 +42,13 @@ pub enum Machine {
     Infuser,
     /// The Colossal Blood Chest.
     Colossal,
+    /// The Dark Tank: a sixteen-bucket tank, not a machine with slots.
+    DarkTank,
 }
 
 impl Machine {
     /// The machines, in registration order.
-    pub const ALL: [Self; 3] = [Self::Chest, Self::Infuser, Self::Colossal];
+    pub const ALL: [Self; 4] = [Self::Chest, Self::Infuser, Self::Colossal, Self::DarkTank];
 
     /// The block. Its id is also the block entity type's registry id, which is the `id`
     /// `minecraft:block_entity_data` tags a payload with, and the id of the item it drops.
@@ -54,6 +58,17 @@ impl Machine {
             Self::Chest => CHEST,
             Self::Infuser => INFUSER,
             Self::Colossal => COLOSSAL,
+            Self::DarkTank => DARK_TANK,
+        }
+    }
+
+    /// The size of this block's tank: the three machines hold ten buckets, the dark tank
+    /// sixteen (`BlockEntityDarkTank.BASE_CAPACITY`).
+    #[must_use]
+    pub const fn capacity(self) -> i32 {
+        match self {
+            Self::Chest | Self::Infuser | Self::Colossal => TANK_CAPACITY,
+            Self::DarkTank => crate::runtime::DARK_TANK_CAPACITY,
         }
     }
 
@@ -62,10 +77,11 @@ impl Machine {
             Self::Chest => 0,
             Self::Infuser => 1,
             Self::Colossal => 2,
+            Self::DarkTank => 3,
         }
     }
 
-    /// The machine a block id names, if it is one of the three.
+    /// The machine a block id names, if it is one of the four.
     #[must_use]
     fn of_block(id: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|machine| machine.id() == id)
@@ -87,7 +103,8 @@ impl Machine {
 }
 
 /// The machines' items, resolved once at registration.
-static ITEM: [std::sync::OnceLock<ItemKey>; 3] = [
+static ITEM: [std::sync::OnceLock<ItemKey>; 4] = [
+    std::sync::OnceLock::new(),
     std::sync::OnceLock::new(),
     std::sync::OnceLock::new(),
     std::sync::OnceLock::new(),
@@ -124,11 +141,11 @@ impl Component for BlockEntityData {
 /// it is placed as). `None` when the tank is empty, which is upstream's
 /// `if (!resource.isEmpty())`.
 #[must_use]
-pub fn carried_patch(tank: i32, type_id: &str) -> Option<Compound> {
-    let amount = carried_tank(tank)?;
+pub fn carried_patch(tank: i32, type_id: &str, capacity: i32) -> Option<Compound> {
+    let amount = carried_tank_with(tank, capacity)?;
     let mut payload = Compound::new();
     payload.insert("id".into(), Tag::String(type_id.into()));
-    crate::blood::write_tank(&mut payload, amount);
+    crate::blood::write_tank_with(&mut payload, amount, capacity);
     let mut patch = Compound::new();
     patch.insert(BLOCK_ENTITY_DATA.into(), Tag::Compound(payload));
     Some(patch)
@@ -168,7 +185,11 @@ pub fn on_drops(level: &dyn LevelHost, event: &mut BlockDropsEvent<'_>) -> Flow 
     let Some(saved) = level.block_entity_data(entity) else {
         return Flow::Continue;
     };
-    let Some(patch) = carried_patch(crate::blood::read_tank(&saved), machine.id()) else {
+    let Some(patch) = carried_patch(
+        crate::blood::read_tank_with(&saved, machine.capacity()),
+        machine.id(),
+        machine.capacity(),
+    ) else {
         return Flow::Continue;
     };
     let Some(item) = machine.item() else {
@@ -208,12 +229,12 @@ impl ItemPart for MachineItem {
         let Some(level) = player.level(&*host) else {
             return;
         };
-        let ours = level
+        let Some(machine) = level
             .block(&*host, event.pos)
-            .is_some_and(|block| Machine::of_block(&block.id(&*host)).is_some());
-        if !ours {
+            .and_then(|block| Machine::of_block(&block.id(&*host)))
+        else {
             return;
-        }
+        };
         let Some(entity) = host.block_entity(level, event.pos) else {
             return;
         };
@@ -221,12 +242,12 @@ impl ItemPart for MachineItem {
             return;
         };
         let current = crate::blood::read_tank_raw(&data).unwrap_or(0);
-        let wanted = restored_tank(asked).min(TANK_CAPACITY);
+        let wanted = restored_tank_with(asked, machine.capacity());
         if wanted == current {
             return;
         }
         let mut patch = Compound::new();
-        crate::blood::write_tank(&mut patch, wanted);
+        crate::blood::write_tank_with(&mut patch, wanted, machine.capacity());
         let _ = entity.merge_data(host, patch);
     }
 }
@@ -236,17 +257,17 @@ mod tests {
     use super::*;
 
     /// The payload's tank, read back the way the machine reads its own.
-    fn tank_of(patch: &Compound) -> i32 {
+    fn tank_of(patch: &Compound, capacity: i32) -> i32 {
         let Some(Tag::Compound(payload)) = crate::blood::field(patch, BLOCK_ENTITY_DATA) else {
             return -1;
         };
-        crate::blood::read_tank(payload)
+        crate::blood::read_tank_with(payload, capacity)
     }
 
     #[test]
     fn a_broken_machine_carries_only_its_tank() {
-        let patch = carried_patch(6_500, CHEST).expect("a filled tank travels");
-        assert_eq!(tank_of(&patch), 6_500);
+        let patch = carried_patch(6_500, CHEST, TANK_CAPACITY).expect("a filled tank travels");
+        assert_eq!(tank_of(&patch, TANK_CAPACITY), 6_500);
         let Some(Tag::Compound(payload)) = crate::blood::field(&patch, BLOCK_ENTITY_DATA) else {
             panic!("the patch holds no block entity data");
         };
@@ -272,16 +293,30 @@ mod tests {
 
     #[test]
     fn an_empty_machine_carries_nothing() {
-        assert!(carried_patch(0, CHEST).is_none());
-        assert!(carried_patch(0, INFUSER).is_none());
+        assert!(carried_patch(0, CHEST, TANK_CAPACITY).is_none());
+        assert!(carried_patch(0, INFUSER, TANK_CAPACITY).is_none());
+        assert!(carried_patch(0, DARK_TANK, crate::runtime::DARK_TANK_CAPACITY).is_none());
     }
 
     #[test]
     fn a_doctored_payload_comes_back_clamped() {
-        let patch = carried_patch(20_000, INFUSER).expect("a tank travels");
+        let patch = carried_patch(20_000, INFUSER, TANK_CAPACITY).expect("a tank travels");
         // The payload itself is what a machine filled; the clamp is on placement.
-        assert_eq!(tank_of(&patch), TANK_CAPACITY);
-        assert_eq!(restored_tank(20_000), TANK_CAPACITY);
+        assert_eq!(tank_of(&patch, TANK_CAPACITY), TANK_CAPACITY);
+        assert_eq!(crate::runtime::restored_tank(20_000), TANK_CAPACITY);
+    }
+
+    #[test]
+    fn a_dark_tank_carries_its_sixteen_buckets() {
+        // `BlockEntityDarkTank.BASE_CAPACITY` is 16,000 mB: a tank of 12,000 travels whole,
+        // where the ten-bucket machines' clamp would have cut it to 10,000.
+        let capacity = crate::runtime::DARK_TANK_CAPACITY;
+        let patch = carried_patch(12_000, DARK_TANK, capacity).expect("a filled tank travels");
+        assert_eq!(tank_of(&patch, capacity), 12_000);
+        let doctored = carried_patch(40_000, DARK_TANK, capacity).expect("a doctored tank travels");
+        assert_eq!(tank_of(&doctored, capacity), capacity);
+        assert_eq!(Machine::DarkTank.capacity(), capacity);
+        assert_eq!(Machine::Chest.capacity(), TANK_CAPACITY);
     }
 
     #[test]
@@ -289,6 +324,7 @@ mod tests {
         assert_eq!(Machine::of_block(CHEST), Some(Machine::Chest));
         assert_eq!(Machine::of_block(INFUSER), Some(Machine::Infuser));
         assert_eq!(Machine::of_block(COLOSSAL), Some(Machine::Colossal));
+        assert_eq!(Machine::of_block(DARK_TANK), Some(Machine::DarkTank));
         assert_eq!(Machine::of_block("evilcraft:blood_extractor"), None);
         assert_eq!(Machine::of_block("minecraft:furnace"), None);
     }

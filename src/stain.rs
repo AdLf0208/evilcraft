@@ -15,7 +15,7 @@
 
 use mod_api::{
     self, BlockEntityEvent, BlockEntityPart, BlockEntityRef, BlockFace, BlockPart,
-    BlockUpdateFlags, CommandInvocation, CommandSource, Compound, Hand, Host, HostSide,
+    BlockUpdateFlags, CommandInvocation, CommandSource, Compound, Host, HostSide,
     InteractionResult, ItemPart, LevelRef, LevelSide, LivingDeathEvent, ModFluidTanks, PlayerRef,
     ServerHost, SupportType, UseOnEvent,
 };
@@ -26,9 +26,6 @@ use crate::runtime::{Cell, STAIN, STAIN_TANK, fall_stain, stain_draw};
 pub const STAIN_ENTITY: &str = "blood_stain";
 /// The block the type belongs to, as the declaration builder takes it.
 pub const STAIN_BLOCK: &str = "blood_stain";
-/// Vanilla's inventory slot of the off hand: the slot number
-/// `PlayerRef::set_inventory_slot` takes for a click made with it.
-const OFF_HAND_SLOT: u32 = 40;
 /// Vanilla's fall damage type: the one death upstream turns into a stain
 /// (`event.getSource() == event.getEntity().damageSources().fall()`).
 const FALL: &str = "minecraft:fall";
@@ -178,7 +175,8 @@ pub fn tanks() -> ModFluidTanks {
 // ---------------------------------------------------------------------------
 
 /// The Blood Extractor's click on a Blood Stain: upstream's `onItemUseFirst`. A standing
-/// click does nothing, and no other block answers it.
+/// click does nothing, and no other block answers it — the Dark Tank's own Part is asked
+/// first for its block and answers `Pass` for everything else.
 pub struct ExtractorDraw;
 
 #[mod_api::horizon_part]
@@ -239,7 +237,7 @@ fn draw(host: &mut dyn ServerHost, player: PlayerRef, event: &UseOnEvent<'_>) ->
         return false;
     }
     let filled = crate::blood::with_extractor_blood(event.stack, outcome.extractor);
-    let written = hand_slot(&*host, player, event.hand)
+    let written = crate::blood::hand_slot(&*host, player, event.hand)
         .is_some_and(|slot| player.set_inventory_slot(host, slot, Some(filled)).is_ok());
     if !written {
         // The extractor took nothing, so the blood stays where it was.
@@ -258,17 +256,6 @@ fn write_stain(host: &mut dyn ServerHost, entity: &BlockEntityRef, amount: i32) 
     let mut patch = Compound::new();
     crate::blood::write_tank_with(&mut patch, amount, STAIN_TANK);
     matches!(entity.merge_data(host, patch), Ok(true))
-}
-
-/// The inventory slot the click's hand holds: the selected hotbar slot for the main hand,
-/// vanilla's off-hand slot for the other.
-fn hand_slot(host: &dyn Host, player: PlayerRef, hand: Hand) -> Option<u32> {
-    match hand {
-        Hand::Main => player
-            .selected_slot(host)
-            .and_then(|slot| u32::try_from(slot).ok()),
-        Hand::Off => Some(OFF_HAND_SLOT),
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank; the Purifier is `blocked(no-purifier-action-table)`)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -1753,3 +1753,270 @@ the port draws the visible model in every state (deviation 5).
 ### Skills
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 8 — the Purifier is blocked; the Dark Tank (`BlockDarkTank`, `BlockEntityDarkTank`) (2026-11-23)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.8**.
+The registry entry, the PR and the ledger stay the orchestrator's.
+
+### The purifier: `blocked(no-purifier-action-table)` — measured, not guessed
+
+The brief's first pick was the Purifier (`evilcraft:purifier`, the consumer of the Blood Chest's
+curse roll), with a stop condition: *if the jar's purifier binds to items this package does not
+carry (its actions are Java classes with no `data/evilcraft/recipe/purifier/`), stop and take the
+`dark_tank`.* The artefact meets it:
+
+- `unzip -l evilcraft-1.21.1-neoforge-1.2.100.jar | grep data/evilcraft | grep -i purif` → only
+  `data/evilcraft/loot_table/blocks/purifier.json` and `data/evilcraft/recipe/crafting/purifier.json`;
+  there is **no** `data/evilcraft/recipe/purifier/`. The behaviour is four Java classes registered in
+  code (`blockentity/tickaction/purifier/PurifierActionRegistry.java`, upstream tag `1.21.1-1.2.100`,
+  commit `aa81220`):
+  - `ToolBadEnchantPurifyAction` — removes curses from any item (self-contained);
+  - `DisenchantPurifyAction` — binds **`evilcraft:blook`** (`ALLOWED_BOOK`), an item this package
+    does **not** carry (`data/evilcraft/horizon/item/` holds the extractor and the three promises; the
+    blook's own recipe is a blood infusion of a book);
+  - `CollectPotionPurifyAction` — binds `minecraft:glass_bottle` **and a `LivingEntity` in the
+    block's AABB** (`getEntitiesOfClass(LivingEntity.class, new AABB(pos, pos+(1,2,1)))`);
+  - `MobHeadDowngradePurifyAction` — vanilla heads, meaningful only with the Blood Infuser's head
+    progression (which only this action consumes).
+- A purifier that ships one of its four actions is an inert machine for the other three; the
+  campaign's rule is that a stopped report naming the gap is the complete result (`mifa`'s precedent).
+  The purifier is **not ported**: `blocked(no-purifier-action-table)`, needing `evilcraft:blook`
+  (item + its infusion recipe), the entity query the potion action needs, and the head progression.
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap 7, quoted as slice 7's coverage row:
+
+> `blood_stain`, `colossal_blood_chest`, `purifier`, `spirit_*`, **`dark_tank`**, `display_stand`,
+> `environmental_accumulator`, … | not ported | the rest of the jar's machinery (gap 7).
+
+It is the brief's own fallback, it is a **tank** family (the port already carries four tanks and the
+`copy_tank_data` drop route), and it gives the extractor a second sink in the field — the gesture the
+Blood Stain already uses, in the other direction. **Tier:** the port is `deep`; this slice is a
+`machines`-shaped family inside it (a block entity with one tank, an item Part, a command). No
+entity, renderer or dimension.
+
+### What the artefact says the family is (read, not guessed)
+
+`BlockDarkTank`, `BlockDarkTankConfig`, `BlockEntityDarkTank` (upstream clone at tag `1.21.1-1.2.100`,
+commit `aa81220`), plus the jar's own `assets/evilcraft/{blockstates,models}/dark_tank.json`,
+`data/evilcraft/loot_table/blocks/dark_tank.json`, `data/evilcraft/recipe/crafting/dark_tank.json`
+and the lang keys:
+
+- **Tank:** `BlockEntityDarkTank.BASE_CAPACITY = 16000` mB, one tank, **no slots and no menu**
+  (`BlockEntityTankInventory` with `0, 0` slots).
+- **Click:** `BlockDarkTank.useItemOn` → `FluidUtil.interactWithFluidHandler(player, hand, world, pos, UP)`:
+  a held fluid container empties into the tank; a click **without** a container toggles `enabled` and
+  prints `amount / capacity mB` in the action bar. `enabled` gates the server ticker, which pushes the
+  tank down into a handler below, or fills container items/players standing under it.
+- **Block:** `strength(0.5)`, `SoundType.GLASS`, a 14/16 shape (`Block.box(2, 0.02, 2, 14, 15.98, 14)`);
+  the model is a custom `evilcraft:dark_tank` loader that renders the fluid — not expressible as
+  content, so the port draws a cube over the jar's own two textures (deviation 2).
+- **Item:** `ItemBlockFluidContainer` — a block item carrying its tank and capacity; the loot table
+  runs `copy_name` + `copy_tank_data`.
+- **Recipe:** `dark_gem` + `c:ingots/iron` + `c:glass_blocks`; `dark_gem` is not carried (gap 1), so
+  the recipe is not either. The three `special/` recipes (combine, clear, large) are crafting-special
+  recipes — gap 1 again.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Block | `evilcraft:dark_tank`, template `minecraft:glass` (full cube, no state properties, no tool needed), `hardness 0.5`, `sounds minecraft:glass` | `BlockDarkTankConfig` |
+| Block entity | one 16,000 mB tank, saved as the pin's `fluids` list; no tick, no slots, no menu | `BlockEntityDarkTank` |
+| Click | a **crouching** right-click with a filled Blood Extractor pours as much as fits and keeps the rest in the item | `BlockDarkTank.useItemOn` → `FluidUtil`, through the port's own container |
+| Tank drop | a broken tank's own item carries `minecraft:block_entity_data` with the tank, clamped to 16,000 on placement | the chest's `copy_tank_data` route (slice 3) |
+| Command | `/evilcraft darktank <pos>` (`tank`, capacity) and `/evilcraft blood` reaching the 16,000 tank | harness only (upstream has no commands) |
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice8.log` (seven tests written, the rules stubbed: `tank_fill` returning zeros,
+`drain_container_into` returning `(0, 0)`, `carried_tank_with`/`restored_tank_with` returning
+`None`/`0`, `Machine::DarkTank.capacity()` returning the machines' 10,000):
+
+```
+test result: FAILED. 57 passed; 6 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+---- runtime::tests::a_filled_extractor_empties_into_a_dark_tank stdout ----
+thread '…' panicked at src/runtime.rs:1214:9:
+assertion `left == right` failed: a 5,000 mB extractor fits a fresh 16,000 mB tank whole
+  left: (0, 0, 0)
+ right: (5000, 5000, 0)
+
+---- runtime::tests::a_dark_tank_takes_only_its_room_and_the_extractor_keeps_the_rest stdout ----
+thread '…' panicked at src/runtime.rs:1224:9:
+assertion `left == right` failed: the tank had room for 2,000 mB
+  left: 0
+ right: 2000
+
+---- tank::tests::a_dark_tank_carries_its_sixteen_buckets stdout ----
+thread '…' panicked at src/tank.rs:314:9:
+assertion `left == right` failed
+  left: 10000
+ right: 12000
+
+failures:
+    runtime::tests::a_dark_tank_payload_carries_sixteen_buckets_and_comes_back_clamped
+    runtime::tests::a_dark_tank_takes_only_its_room_and_the_extractor_keeps_the_rest
+    runtime::tests::a_doctored_dark_tank_is_read_at_its_own_capacity
+    runtime::tests::a_filled_extractor_empties_into_a_dark_tank
+    runtime::tests::a_full_dark_tank_or_an_empty_extractor_moves_nothing
+    tank::tests::a_dark_tank_carries_its_sixteen_buckets
+
+test result: FAILED. 57 passed; 6 failed; …
+EXIT:101
+```
+
+The seventh new test (`a_dark_tank_holds_sixteen_buckets`, the two constants) passed against the
+stubs by construction; it is the boundary a wrong capacity breaks (the in-game `0/16000` readout is
+its leg). Green: `sdk-test.log` — **63 passed, 0 failed** (56 before + 7). `sdk-clippy.log` —
+`cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, `BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 6/63** (`EXIT:101`) | `sdk-test-red-slice8.log` |
+| tests (green) | `cargo test` | **63 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 519 API uses, 16 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **206,244 B**, sha256 `4d8f7f67…1de410`, `CMP-IDENTICAL`, 100 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-check.log` |
+| fits, the pin | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (63 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 14 recipe/loot files; unchanged slice 1 `"rolls": 1.0`; **the new loot table `ok`** | job report |
+| artifact record | `sdk-artifact-0.2.8.txt` | bytes/sha/entries/manifest/runtime+dark_tank sha, check and fits lines, the packed list | `sdk-artifact-0.2.8.txt` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-2a04e567b6f4`, with the log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/`, `assets/` and `horizon-mod.toml` are
+byte-identical to the port (`diff -r`/`cmp` empty, `version = "0.2.8"`), so the game ran the sources
+this package is built from (`e2e-export-check-0.2.8.log`).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `launcher-game.sh run evilcraft` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** (A, A2, B–F, H–W, Y, Z, AA, AB, **AC, AD, AE**) | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=darktank` | **`FAIL` + `EXIT:1`** at AC (*the crouching click poured 0 mB into the tank, expected the 2,000 mB room it had*) | `e2e-launcher-selftest-darktank.log` |
+| selftest (slices 2–7, history) | `SELFTEST=infuser|tank|blood|stain|fall|colossal` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=10 ok=10 missing-exit=0
+bad-exit=0` (exit 0): the nine earlier legs stay green and the tenth is this slice's.
+
+Transcript of the new phases (verbatim from `e2e-launcher.log`):
+
+```
+== AC: a Dark Tank holds sixteen buckets, and a filled extractor's crouching click fills it ==
+  Dark Tank [204, 101, 6]: tank 0/16000 mB, t=11077
+  a fresh evilcraft:dark_tank at 204,101,6 reads 0/16000 mB
+  Dark Tank [204, 101, 6]: tank 14000/16000 mB, t=11094
+  Blood Extractor held: 5000/5000 mB, t=11122.
+  crouch + right-click on 204,101,6 (aim on evilcraft:dark_tank)
+  Dark Tank [204, 101, 6]: tank 16000/16000 mB, t=11162
+  Blood Extractor held: 3000/5000 mB, t=11169.
+  extractor 5000 -> 3000 mB, dark tank 14000 -> 16000 mB (the 2,000 mB room, the rest kept)
+  the dark tank's saved tank: 204, 101, 6 has the following block data: [{Amount: 16000, Fluid: "evilcraft:blood"}]
+== AD: a standing click pours nothing, and neither does a crouching click on stone ==
+  Dark Tank [204, 101, 6]: tank 0/16000 mB, t=11200
+  right-click on 204,101,6 (aim on evilcraft:dark_tank)
+  Dark Tank [204, 101, 6]: tank 0/16000 mB, t=11224
+  Blood Extractor held: 5000/5000 mB, t=11232.
+  standing: extractor 5000 mB, dark tank 0 mB (nothing moved)
+  crouch + right-click on 204,101,8 (aim on minecraft:stone)
+  Blood Extractor held: 5000/5000 mB, t=11279.
+  the same crouching click on minecraft:stone: extractor still 5000 mB
+  crouch + right-click on 204,101,6 (aim on evilcraft:dark_tank)
+  Dark Tank [204, 101, 6]: tank 5000/16000 mB, t=11319
+  Blood Extractor held: 0/5000 mB, t=11327.
+  crouching on the tank: extractor 5000 -> 0 mB, dark tank 0 -> 5000 mB
+== AE: the broken tank drops itself carrying its blood, and places back full ==
+  Dark Tank [204, 101, 6]: tank 12000/16000 mB, t=11356
+  break: {"block":"minecraft:air","drops":{"evilcraft:dark_tank":1},"picked_up":{},"items_left_on_ground":1}
+  the dropped evilcraft:dark_tank: Player81900 has the following entity data: {components: {"minecraft:block_entity_data": {id: "evilcraft:dark_tank", fluids: [{Amount: 12000, Fluid: "evilcraft:blood"}]}}, count: 1, id: "evilcraft:dark_tank"}
+  Dark Tank [204, 101, 6]: tank 12000/16000 mB, t=11544
+  the dark tank broke into itself carrying 12000 mB of evilcraft:blood, and places back at 12000/16000 mB
+```
+
+**Fail-capable, four ways.** (1) `SELFTEST=darktank` inverts AC's pour assertion and exits 1 (log
+above). (2) AD is the counterfactual: the *same* tank, the *same* full extractor and the *same*
+click **standing** pour nothing, and the same crouching click on `minecraft:stone` pours nothing,
+while the same crouching click on the tank pours the whole 5,000 — a Part that ignored either the
+crouch or the block would pour in one of those windows. (3) AC's clamp is its own differential: with
+14,000 mB in the tank only 2,000 moves and the extractor keeps 3,000, so a click that drained the
+whole container would fail. (4) The whole-package control leaves every id unknown, so AC cannot even
+place the tank.
+
+### Harness facts learned here
+
+1. **The launcher's export carries every mod of its instance, not just this port's** — the game's
+   `horizon-native-mods/` in `~/.cache/horizon-e2e/0a875da/evilcraft/` lists other ports' libs. The
+   export check therefore compares this port's own directory (`horizon-native-mods/evilcraft/`)
+   against the port, not the export root.
+2. **A subagent's outer `echo EXIT:$?` wrapper swallows the leg's status.** `e2e-guard.sh` prints its
+   own `EXIT:<rc>` from `wait "$child"`, so a `bash -c '…; echo EXIT:$?'` around the leg made a
+   FAILing control look like `EXIT:0` (measured 2026-11-23: the first control log ended
+   `EXIT:1 / EXIT:1 / EXIT:0`). Run the leg directly (`env CONTROL=1 … bash tools/e2e.sh`) and let
+   its own trap and the guard report the status; `check-e2e-logs.py` reads the last `EXIT:` line.
+3. **A `minecraft:glass` template block is a plain full cube** and drops through its own loot table
+   with any tool (`requires_tool` unset): a diamond pickaxe breaks it in survival and `ctl break`
+   reports the drop.
+4. **`aim_at`/`crouch_click` work on a full-cube mod block at `h=0.5`** with the block's own id as
+   the expected crosshair state (`evilcraft:dark_tank`); the stain's `h=0.03` is only for its
+   one-pixel shape.
+
+### Deviations this slice adds
+
+1. **The click's gesture and its container are the port's own.** Upstream takes *any* right-click
+   with any fluid-container item through the item fluid capability; this pin's capability items carry
+   water and lava only, so the port's container is the extractor (custom data, as everywhere else) and
+   its gesture is the crouching click the stain already uses. A standing click pours nothing (phase AD
+   asserts it).
+2. **The block is a cube over the jar's two textures.** Upstream's model is a custom
+   `evilcraft:dark_tank` loader that draws the fluid inside a 14/16 block with a 14/16 shape; a content
+   block cannot (same class as the Blood Chest's cube deviation), so the port's block is the full cube
+   of the template with `dark_tank_side`/`dark_tank_up`.
+3. **The auto-supply half is not carried.** `enabled`, the right-click readout in the action bar, the
+   downward auto-fill into a handler or container items/players below, the in-inventory auto-fill
+   (`autoFillBuckets`), the item's tank tooltip and the light emission are all part of
+   `BlockEntityDarkTank.TickerServer` / `ItemBlockFluidContainer`; none is in this slice. The tank's
+   own pipe faces are declared as outputs only (the machines' gap 6: no
+   `block_entity_accepts_fluid` at this pin, so the tank would hold a foreign fluid and read 0).
+4. **The block entity has no tick.** Upstream's ticker only drives deviation 3's auto-supply, so with
+   it gone there is nothing to tick; the click writes the tank and the engine saves it.
+5. **The recipe is not carried** (gap 1): `dark_gem` is not in the port, and the three `special/`
+   recipes are crafting-special handlers this pin does not express as content.
+6. **The creative tab lists the tank empty.** Upstream fills the tab with a tank per fluid, including a
+   blood tank at every capacity step (`capacity << 2` up to `maxTankCreativeSize`); the port's tab
+   holds the one plain block, and the blood is put in with the extractor.
+
+### Upstream defects fixed
+
+None new. (`copy_tank_data`'s applier, the shadowed leather recipe, the 25,000 mB recipe and the
+missing pickaxe tag are the earlier slices'.) One upstream oddity is recorded, not "fixed": the
+`dark_tank` model's `down` face uses `#up`, so both ends of the upstream tank show the top texture —
+the port's cube keeps that (`cube_bottom_top` with `bottom` = `dark_tank_up`).
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `dark_tank` block, item, blockstate, model, texture, lang, creative row | **tested** | AC: placed from its own item at `204,101,6`, read back `0/16000 mB`; AE: broken and placed back |
+| the 16,000 mB tank (`BlockEntityDarkTank.BASE_CAPACITY`) | **tested (unit + in game)** | the unit `a_dark_tank_holds_sixteen_buckets`; AC's `0/16000`, `14000/16000`, `16000/16000` reads; `/data get block … fluids` |
+| a filled extractor pours in, keeping what does not fit | **tested** | AC: 14,000 + 5,000 → tank 16,000, extractor 3,000; AD: fresh tank 0 + 5,000 → 5,000, extractor 0 |
+| a standing click pours nothing; a crouching click on stone pours nothing | **tested** | AD, both directions |
+| the saved tank survives in the block entity's own compound | **tested** | AC: `204, 101, 6 has the following block data: [{Amount: 16000, Fluid: "evilcraft:blood"}]` |
+| `copy_tank_data` on the tank (the tank in the dropped item) | **tested** | AE: 12,000 mB broken, carried, placed back at 12,000/16,000 |
+| `/evilcraft darktank`, and `/evilcraft blood` reaching the 16,000 tank | **tested** | every readout and the harness set in AC/AE |
+| the auto-supply toggle, the downward/held auto-fill, the item tooltip, the light emission | not ported | deviations 1, 3 (the container item capability the pin lacks) |
+| the fluid-rendering model and the 14/16 shape/outline | not ported | deviation 2 (no block-entity renderer at this tier's shape) |
+| the jar's `dark_tank` recipe and its three `special/` recipes | not ported | gap 1 (`dark_gem` not carried; crafting-special not expressible) |
+| the purifier (`BlockPurifier` + `BlockEntityPurifier`) | **blocked(no-purifier-action-table)** | the four `IPurifierAction` classes; needs `evilcraft:blook`, the potion entity query and the head progression (see the top of this section) |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices

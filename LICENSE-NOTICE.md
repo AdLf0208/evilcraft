@@ -17,13 +17,13 @@ same:
 | code | `gradle.properties` (`license=MIT`), copied into the jar's `neoforge.mods.toml` | **MIT** |
 | **code and images** | the release's own `README.md` (tag `1.21.1-1.2.100`): *"All code and images are licenced under [Creative Commons 4](http://creativecommons.org/licenses/by/4.0/)"* | **CC BY 4.0** |
 
-The README is the narrower, more specific grant and it is the one that covers the **six carried
-textures** — `assets/evilcraft/textures/item/blood_extractor.png`,
-`assets/evilcraft/textures/block/blood_chest.png` (the upstream file of
-`colossal_blood_chest.png`), `assets/evilcraft/textures/block/blood_stain_0.png` …`_2.png` and
-`assets/evilcraft/textures/item/blood_stain.png`. This port therefore distributes under
-**CC BY 4.0**, which requires attribution, and keeps the MIT grant on record as the build
-metadata's alternative.
+The README is the narrower, more specific grant and it is the one that covers the **carried
+textures** — the Blood Extractor's, the Promise's, the Blood Stain's, the Blood Chest's, the
+Blood Infuser's, the Colossal Blood Chest's, the Reinforced Undead Planks' and the Dark Tank's
+(`assets/evilcraft/textures/{item,block}/*.png`, the block files including the chest's
+`blood_chest.png`, the upstream file of `colossal_blood_chest.png`). This port therefore
+distributes under **CC BY 4.0**, which requires attribution, and keeps the MIT grant on record
+as the build metadata's alternative.
 
 ### Attribution (CC BY 4.0 §3(a))
 

@@ -6,6 +6,8 @@
   "block.evilcraft.blood_infuser": "Blood Infuser",
   "block.evilcraft.blood_stain": "Blood Stain",
   "block.evilcraft.blood_stain.info": "A splash of Blood created when an entity falls to death.",
+  "block.evilcraft.dark_tank": "Dark Tank",
+  "block.evilcraft.dark_tank.info": "A sixteen-bucket tank of Blood. A crouching right-click with a filled Blood Extractor pours it in.",
   "item.evilcraft.blood_extractor": "Blood Extractor",
   "item.evilcraft.blood_extractor.info": "Hold in inventory when slaying mobs.\nShift + Right click to extract or auto-supply.",
   "item.evilcraft.promise_tier_1": "Promise of Tenacity I",

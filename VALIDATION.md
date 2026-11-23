@@ -388,3 +388,64 @@ What the new phases measured (from `e2e-launcher.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 9/9 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 8 (0.2.8) — the Purifier is blocked; the Dark Tank (`BlockDarkTank`, `BlockEntityDarkTank`)
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`.
+Full record: `notes.md` § **Slice 8**; logs under `ports/_shared/evidence/evilcraft/` and
+`ports/_shared/evidence/evilcraft-e2e/`. Every step ran through `ports/tools/build-slot.sh`
+(`BUILD_LOCAL=1`, `CARGO_INCREMENTAL=0`, no `--target-dir`).
+
+**The brief's first pick, the Purifier, is `blocked(no-purifier-action-table)`**: the jar has no
+`data/evilcraft/recipe/purifier/` and the behaviour is four Java `IPurifierAction` classes; one of
+them (`DisenchantPurifyAction`) binds `evilcraft:blook`, an item this package does not carry, and
+`CollectPotionPurifyAction` binds a living entity in the block's AABB. The fallback (the brief's own)
+is the Dark Tank, gap 7's next tank family.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` with the Dark Tank rules stubbed | **FAILED 6/63** — *a 5,000 mB extractor fits a fresh 16,000 mB tank whole* (`left: (0, 0, 0) / right: (5000, 5000, 0)`), *the tank had room for 2,000 mB* (`left: 0 / right: 2000`), *left: 10000 / right: 12000* | `sdk-test-red-slice8.log` |
+| tests (green) | `cargo test` | **63 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 519 API uses, 16 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **206,244 B** `4d8f7f67…1de410`, `CMP-IDENTICAL`, 100 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | exit 0, `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check.log` |
+| fits (the pin) | `cargo horizon-mod fits evilcraft.hmod --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | exit 0 — `0a875da  made for` | `sdk-fits.log` |
+| fits (another build) | `… --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | exit 0 — `0b14f8a  fits` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** (63 tests, 0 clippy warnings, runtime byte-identical, check + fits, Skills line) | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 14 recipe/loot files: slice 1's one unverified `"rolls": 1.0`; the new loot table `ok` | job report |
+| artifact record | `sdk-artifact-0.2.8.txt` | bytes/sha/entries/manifest/runtime+dark_tank sha, check and fits lines, the packed list | `sdk-artifact-0.2.8.txt` |
+
+Launcher build: `native-0a875da-2a04e567b6f4`, log line `Compiling evilcraft (1 of 1)`; the
+export's `src/`, `data/`, `assets/` and `horizon-mod.toml` are byte-identical to the port
+(`diff -r`/`cmp` empty, version `0.2.8`) — `e2e-export-check-0.2.8.log`.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `launcher-game.sh run evilcraft` (with `OLD=1`, the 0.2.3 export) | **`PASS` + `EXIT:0`** — A, A2, B–F, H–W, Y, Z, AA, AB, AC, AD, AE | `e2e-launcher.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control.log` |
+| selftest (slice 1) | `SELFTEST=1` | **`FAIL` + `EXIT:1`** at C | `e2e-launcher-selftest.log` |
+| selftest (this slice) | `SELFTEST=darktank` | **`FAIL` + `EXIT:1`** at AC — *the crouching click poured 0 mB into the tank, expected the 2,000 mB room it had* | `e2e-launcher-selftest-darktank.log` |
+| selftest (slices 2–7, history) | `SELFTEST=infuser|tank|blood|stain|fall|colossal` | `FAIL` + `EXIT:1` — kept as history | `e2e-launcher-selftest-*.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=10 ok=10 missing-exit=0
+bad-exit=0` (exit 0).
+
+What the new phases measured (from `e2e-launcher.log`):
+
+- AC: a fresh `evilcraft:dark_tank` reads `0/16000 mB`; with 14,000 mB and a full 5,000 mB extractor
+  a crouching click pours exactly the **2,000 mB room** it had (tank 16,000, the extractor keeping
+  3,000), and the block entity's own `fluids` reads
+  `[{Amount: 16000, Fluid: "evilcraft:blood"}]`.
+- AD: the same click **standing** pours nothing (tank 0, extractor 5,000), the same crouching click
+  on `minecraft:stone` pours nothing, and the same crouching click on a fresh tank pours the whole
+  5,000 (extractor 0).
+- AE: in survival a diamond pickaxe breaks the tank, which drops itself carrying
+  `minecraft:block_entity_data` `{id: "evilcraft:dark_tank", fluids: [{Amount: 12000, …}]}` — more
+  than the ten-bucket machines' clamp — and placing it back reads `12000/16000 mB`.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 10/10 logs end consistently.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.

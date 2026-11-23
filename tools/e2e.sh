@@ -99,11 +99,20 @@
 #  AB the controller breaks into itself in survival with an axe and its own item carries the
 #     blood tank (`copy_tank_data` on the third machine), and a plank drops itself.
 #
+# Slice 8 — the Dark Tank (`BlockDarkTank`, `BlockEntityDarkTank`):
+#  AC a fresh `evilcraft:dark_tank` reads `0/16000 mB`; with 14,000 mB in it a crouching click
+#     with a full 5,000 mB extractor pours exactly the 2,000 mB room it had (tank 16,000, the
+#     extractor keeping 3,000), and `/data get block … fluids` reads the saved 16,000;
+#  AD the same click **standing** pours nothing, the same crouching click on `minecraft:stone`
+#     pours nothing, and on a fresh tank the same crouching click pours the whole 5,000;
+#  AE in survival the tank breaks into its own item carrying 12,000 mB (the machines' clamp
+#     would cut that to 10,000) and places back reading `12000/16000 mB`.
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
 #
-# The operator gate on `/evilcraft info|infuser|stain|colossal` is unit-tested
+# The operator gate on `/evilcraft info|infuser|stain|colossal|darktank` is unit-tested
 # (`the_readout_needs_an_operator_and_names_only_this_chest`) and registered at level 2;
 # its in-game leg needs a LAN guest at level 0 (`lan open 0`), because an integrated
 # server refuses `op`/`deop` (HANDOVER §9d trap 6), and that leg belongs to the next
@@ -118,9 +127,9 @@
 # **without** the package, where the chest item never registers and the run must fail.
 #
 # SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
-# SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's and
-# SELFTEST=colossal flips Y's `formed` assertion (each must
-# FAIL), proving the scenarios can fail. Phase I is the
+# SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's,
+# SELFTEST=colossal flips Y's `formed` assertion and SELFTEST=darktank flips AC's pour (each
+# must FAIL), proving the scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
 # in its tank drops an item that carries no payload, which is exactly what a break the listener
@@ -128,6 +137,8 @@
 # mob and a lethal arrow, whose shooter is a skeleton rather than the player. Phase Z is the
 # Colossal Blood Chest's counterfactual (one shell block out: no repair) and phase AA its
 # differential (the same pickaxe and tank in a plain Blood Chest repair at the same rate).
+# Phase AD is the Dark Tank's differential: a standing click and a crouching click on stone
+# pour nothing, while the same crouching click on the tank pours its 5,000 mB.
 set -Eeuo pipefail
 export LC_ALL=C
 [ -z "${EC_DEBUG:-}" ] || set -x
@@ -159,11 +170,13 @@ CHEST=evilcraft:blood_chest
 INFUSER=evilcraft:blood_infuser
 STAIN=evilcraft:blood_stain
 COLOSSAL=evilcraft:colossal_blood_chest
+DARK_TANK=evilcraft:dark_tank
 PLANKS=evilcraft:reinforced_undead_planks
 EXTRACTOR=evilcraft:blood_extractor
 PROMISE=evilcraft:promise_tier_3
 TANK_CAPACITY=10000
 STAIN_TANK=5000
+DARK_TANK_CAPACITY=16000
 MB_PER_DAMAGE=5
 TICKS_PER_DAMAGE=2
 
@@ -402,6 +415,27 @@ colossal() { # colossal X Y Z
     eval "$(python3 "$PORT/tools/parse_colossal.py" "$COLOSSAL_LINE")"
     [ "${ok:-0}" = 1 ] || fail "the colossal line did not parse: $COLOSSAL_LINE"
     echo "  $COLOSSAL_LINE" >&2
+}
+
+# `/evilcraft darktank X Y Z`: the line, then the parsed fields in TANK, CAPACITY and TIME.
+darktank() { # darktank X Y Z
+    # Wait for the reply itself: the chat is read newest first and the readout ends in
+    # `t=<game time>`, so a new one can never equal the previous one.
+    local prev line i
+    prev=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Dark Tank \[' || true)
+    say "evilcraft darktank $1 $2 $3"
+    line=$prev
+    for i in $(seq 1 40); do
+        ctl wait 4 >/dev/null
+        line=$(ctl messages 40 | jq -r '.chat[]' | grep -m1 'Dark Tank \[' || true)
+        [ -n "$line" ] && [ "$line" != "$prev" ] && break
+    done
+    [ -n "$line" ] && [ "$line" != "$prev" ] \
+        || fail "no /evilcraft darktank reply for $1 $2 $3 (last: '${line}')"
+    DARKTANK_LINE=$line
+    eval "$(python3 "$PORT/tools/parse_darktank.py" "$DARKTANK_LINE")"
+    [ "${ok:-0}" = 1 ] || fail "the dark tank line did not parse: $DARKTANK_LINE"
+    echo "  $DARKTANK_LINE" >&2
 }
 
 # Place a stain from its own item on the arena floor below X Y Z.
@@ -1658,4 +1692,118 @@ AB_CARRIED=${carried:-none}
 [ "$fluid" = "evilcraft:blood" ] || fail "the dropped colossal chest carries '$fluid', expected evilcraft:blood"
 echo "  the controller broke into itself carrying $AB_CARRIED mB of $fluid"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, and the controller breaks into an item carrying its 4,000 mB with an axe"
+echo "== AC: a Dark Tank holds sixteen buckets, and a filled extractor's crouching click fills it =="
+# `BlockEntityDarkTank.BASE_CAPACITY` = 16,000 mB; upstream's `BlockDarkTank.useItemOn` hands a
+# click on the tank to `FluidUtil.interactWithFluidHandler`, which fills it from the held fluid
+# container. This port's container is the extractor, and its gesture is the crouching click.
+DTX=$((X0 + 4))
+DTY=101
+DTZ=6
+place_chest "$DTX" "$DTY" "$DTZ" "$DARK_TANK"
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 0 ] || fail "a fresh dark tank reads $TANK mB, expected 0"
+[ "$CAPACITY" = "$DARK_TANK_CAPACITY" ] \
+    || fail "the dark tank reports a $CAPACITY mB tank, expected $DARK_TANK_CAPACITY"
+echo "  a fresh $DARK_TANK at $DTX,101,$DTZ reads $TANK/$CAPACITY mB"
+# The clamp: 14,000 mB in the tank and a full 5,000 mB extractor leave 2,000 mB behind.
+say "evilcraft blood $DTX $DTY $DTZ 14000"
+ctl wait 10 >/dev/null
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 14000 ] || fail "the harness left the dark tank at $TANK mB, expected 14,000"
+ctl command "clear @s" >/dev/null
+ctl command "item replace entity @s hotbar.8 with $EXTRACTOR 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 9 >/dev/null
+ctl wait 2 >/dev/null
+say "evilcraft held 5000"
+ctl wait 10 >/dev/null
+held_blood "before the fill"
+[ "$HELD_BLOOD" = 5000 ] || fail "the extractor holds $HELD_BLOOD mB, expected the 5,000 the command set"
+ctl command "execute in minecraft:the_end run tp @s $((DTX - 2)).5 101 $DTZ.5" >/dev/null
+ctl wait 6 >/dev/null
+crouch_click "$DTX" "$DTY" "$DTZ" .5 "$DARK_TANK"
+darktank "$DTX" "$DTY" "$DTZ"
+DT_MOVED=$((TANK - 14000))
+held_blood "after the crouching click"
+DT_HELD=$HELD_BLOOD
+if [ "$SELFTEST" = darktank ]; then
+    echo "(selftest=darktank: asserting the crouching click poured nothing)"
+    DT_MOVED=0
+fi
+[ "$DT_MOVED" = 2000 ] \
+    || fail "the crouching click poured $DT_MOVED mB into the tank, expected the 2,000 mB room it had"
+[ "$TANK" = "$DARK_TANK_CAPACITY" ] \
+    || fail "the dark tank holds $TANK mB after the click, expected $DARK_TANK_CAPACITY"
+[ "$DT_HELD" = 3000 ] \
+    || fail "the extractor holds $DT_HELD mB after the click, expected the 3,000 that did not fit"
+echo "  extractor 5000 -> $DT_HELD mB, dark tank 14000 -> $TANK mB (the 2,000 mB room, the rest kept)"
+# The tank is the pin's saved `fluids` list, the same compound the chests keep:
+# `/data get block` reads the block entity's own data, not the readout's clamp.
+ctl command "data get block $DTX $DTY $DTZ fluids" >/dev/null
+ctl wait 10 >/dev/null
+DT_SAVED=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 "has the following block data" || true)
+case "$DT_SAVED" in
+    "$DTX, $DTY, $DTZ has the following block data: [{Amount: 16000, Fluid: \"evilcraft:blood\"}]")
+        echo "  the dark tank's saved tank: $DT_SAVED" >&2 ;;
+    *) fail "the dark tank's saved data is not 16000 mB of evilcraft:blood: '$DT_SAVED'" ;;
+esac
+
+echo "== AD: a standing click pours nothing, and neither does a crouching click on stone =="
+# The same tank, emptied, and the same full extractor: standing, the click pours nothing; the
+# same crouching click on a vanilla block pours nothing; the same crouching click on the tank
+# pours the whole 5,000. That triple is the gesture's and the block's differential.
+say "evilcraft blood $DTX $DTY $DTZ 0"
+say "evilcraft held 5000"
+ctl wait 12 >/dev/null
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 0 ] || fail "the harness left the dark tank at $TANK mB, expected 0"
+stand_click "$DTX" "$DTY" "$DTZ" .5 "$DARK_TANK"
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 0 ] || fail "a standing click poured $TANK mB into the tank, expected nothing"
+held_blood "after the standing click"
+[ "$HELD_BLOOD" = 5000 ] || fail "a standing click emptied the extractor to $HELD_BLOOD mB"
+echo "  standing: extractor $HELD_BLOOD mB, dark tank $TANK mB (nothing moved)"
+ctl command "execute in minecraft:the_end run setblock $DTX 101 $((DTZ + 2)) minecraft:stone" >/dev/null
+ctl wait 6 >/dev/null
+ctl command "execute in minecraft:the_end run tp @s $((DTX - 2)).5 101 $((DTZ + 2)).5" >/dev/null
+ctl wait 6 >/dev/null
+crouch_click "$DTX" 101 $((DTZ + 2)) .99 minecraft:stone
+held_blood "after the crouching click on stone"
+[ "$HELD_BLOOD" = 5000 ] \
+    || fail "a crouching click on minecraft:stone emptied the extractor to $HELD_BLOOD mB"
+echo "  the same crouching click on $(block_name "$DTX" 101 $((DTZ + 2))): extractor still $HELD_BLOOD mB"
+ctl command "execute in minecraft:the_end run tp @s $((DTX - 2)).5 101 $DTZ.5" >/dev/null
+ctl wait 6 >/dev/null
+crouch_click "$DTX" "$DTY" "$DTZ" .5 "$DARK_TANK"
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 5000 ] || fail "the crouching click on the tank left it at $TANK mB, expected 5000"
+held_blood "after the crouching click on the tank"
+[ "$HELD_BLOOD" = 0 ] || fail "the crouching click on the tank left $HELD_BLOOD mB in the extractor"
+echo "  crouching on the tank: extractor 5000 -> $HELD_BLOOD mB, dark tank 0 -> $TANK mB"
+
+echo "== AE: the broken tank drops itself carrying its blood, and places back full =="
+# `copy_tank_data` runs on the dark tank's loot table too; 12,000 mB is more than the ten-bucket
+# machines could carry, so this also proves the tank's own sixteen-bucket capacity travels.
+ctl command "clear @s" >/dev/null
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
+ctl wait 4 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+say "evilcraft blood $DTX $DTY $DTZ 12000"
+ctl wait 12 >/dev/null
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 12000 ] || fail "the harness left the dark tank at $TANK mB, expected 12,000"
+break_survival "$DTX" "$DTY" "$DTZ" "$DARK_TANK" minecraft:diamond_pickaxe
+pick_hold "$DTX" "$DTY" "$DTZ" "$DARK_TANK"
+eval "$(python3 "$PORT/tools/parse_components.py" "$HELD_COMPONENTS" "$DARK_TANK")"
+DT_CARRIED=${carried:-none}
+[ "${ok:-0}" = 1 ] || fail "the dropped dark tank carries no block entity data: '$HELD_COMPONENTS'"
+[ "$DT_CARRIED" = 12000 ] || fail "the dropped dark tank carries $DT_CARRIED mB, expected 12000"
+[ "$fluid" = "evilcraft:blood" ] || fail "the dropped dark tank carries '$fluid', expected evilcraft:blood"
+place_held "$DTX" "$DTY" "$DTZ" "$DARK_TANK"
+darktank "$DTX" "$DTY" "$DTZ"
+[ "$TANK" = 12000 ] || fail "the placed dark tank reads $TANK mB, expected the carried 12,000"
+[ "$CAPACITY" = "$DARK_TANK_CAPACITY" ] || fail "the placed dark tank reports a $CAPACITY mB tank"
+echo "  the dark tank broke into itself carrying $DT_CARRIED mB of $fluid, and places back at $TANK/$CAPACITY mB"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 9 of its carried recipe files and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB"

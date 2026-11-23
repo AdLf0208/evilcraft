@@ -14,9 +14,12 @@
 //! its damage source's causing entity is a player. The mod keeps no state of its own: the
 //! tanks live in the block entities' saved compounds, the extractor's blood in the stack's
 //! components, and a broken machine's tank travels on its own item as
-//! `minecraft:block_entity_data` ([`tank`]).
+//! `minecraft:block_entity_data` ([`tank`]). A dark tank is one sixteen-bucket block entity
+//! the extractor's crouching click pours blood into ([`dark_tank`]), and the colossal blood
+//! chest is the same repair machine at the size of a hollow 3×3×3 shell ([`colossal`]).
 pub mod blood;
 pub mod colossal;
+pub mod dark_tank;
 pub mod infuser;
 pub mod runtime;
 pub mod stain;
@@ -65,8 +68,24 @@ impl Hooks for Mod {
         r.block_fluids(&stain, stain::tanks());
         // A crouching right-click with the extractor draws a stain's blood into the item
         // (upstream's `ItemBloodExtractor.onItemUseFirst`): the second Part on the item,
-        // beside its tooltip.
+        // beside its tooltip. The dark tank's Part is registered **before** it, because that
+        // one answers `Some` only for its own block and this one answers every click (with
+        // `Pass`), and the first Part to answer wins.
+        r.item_part(extractor, dark_tank::TankFill);
         r.item_part(extractor, stain::ExtractorDraw);
+
+        // The Dark Tank: one sixteen-bucket tank with no slots and no menu. Its block is a
+        // content block; its own item carries the tank when it is broken, like the three
+        // machines'.
+        let tank_block = r.block_key(runtime::DARK_TANK);
+        let kind = r
+            .block_entity_type(dark_tank::DARK_TANK_ENTITY)
+            .blocks(&[dark_tank::DARK_TANK_BLOCK])
+            .build();
+        r.block_entity_part(&kind, dark_tank::DarkTank)
+            .expect("evilcraft declares the dark tank's own block entity type");
+        r.block_fluids(&tank_block, dark_tank::tanks());
+        tank::Machine::DarkTank.register(r);
 
         // The Blood Infuser: its own block entity type and Part, its seven slots, its
         // tank, and the recipe type its data files are written in. The recipe type must
@@ -126,7 +145,6 @@ impl Hooks for Mod {
     fn register_commands(&self, host: &mut dyn ServerHost, event: &mut RegisterCommandsEvent<'_>) {
         blood::register_commands(host, event);
     }
-
     /// Run a parsed `/evilcraft ...` command.
     fn run_mod_command(
         &self,

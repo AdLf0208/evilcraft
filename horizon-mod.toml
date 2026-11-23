@@ -1,17 +1,17 @@
 id = "evilcraft"
 name = "EvilCraft"
-version = "0.2.7"
+version = "0.2.8"
 description = """A port of EvilCraft's blood economy for Horizon: the Blood Extractor fills with
 the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), a mob that dies from
 fall damage leaves a Blood Stain holding 20 mB for each point of its max health, a crouching
-right-click drains a Blood Stain's five buckets into it, the Blood Infuser spends that blood
-infusing an item into another (a bone into a blaze rod, sand into soul sand, and the mod's own
-recipes as data), and the Blood Chest spends it to repair the ten damaged items in its slots,
-one damage point every two ticks for 5 mB, with a broken anvil stepping back to a whole one
-for 125 mB. The Colossal Blood Chest is the same machine at the size of a hollow 3x3x3 shell
-of Reinforced Undead Planks: 45 repair slots, and no repair while the shell is open. All
-three machines keep their blood when broken: the dropped item carries the tank, and placing
-it again fills the machine back, clamped to its 10,000 mB."""
+right-click drains a Blood Stain's five buckets into it or pours a filled extractor into a Dark
+Tank's sixteen, the Blood Infuser spends that blood infusing an item into another (a bone into a
+blaze rod, sand into soul sand, and the mod's own recipes as data), and the Blood Chest spends it
+to repair the ten damaged items in its slots, one damage point every two ticks for 5 mB, with a
+broken anvil stepping back to a whole one for 125 mB. The Colossal Blood Chest is the same
+machine at the size of a hollow 3x3x3 shell of Reinforced Undead Planks: 45 repair slots, and no
+repair while the shell is open. All four blocks keep their blood when broken: the dropped item
+carries the tank, and placing it again fills the block back, clamped to its own capacity."""
 authors = ["rubensworks (kroeser)", "AdLf0208"]
 # A native mod: Rust in src/, compiled by the launcher against the game build [native] pins,
 # beside data/ and assets/. The id is the resource namespace and the only identity.

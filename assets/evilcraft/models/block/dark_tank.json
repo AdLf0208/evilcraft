@@ -1,0 +1,8 @@
+{
+  "parent": "minecraft:block/cube_bottom_top",
+  "textures": {
+    "bottom": "evilcraft:block/dark_tank_up",
+    "side": "evilcraft:block/dark_tank_side",
+    "top": "evilcraft:block/dark_tank_up"
+  }
+}

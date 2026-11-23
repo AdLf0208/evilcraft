@@ -16,7 +16,7 @@
 use mod_api::{
     self, BlockEntityEvent, BlockEntityPart, BlockEntityRef, BlockEntityTickEvent,
     BlockEntityTicksEvent, BlockPart, ClientHost, Command, CommandArgumentValue, CommandInvocation,
-    CommandSource, Component, Compound, EntityRef, Flow, Host, HostTransaction, Identifier,
+    CommandSource, Component, Compound, EntityRef, Flow, Hand, Host, HostTransaction, Identifier,
     ItemPart, ItemPlace, ItemStack, LevelRef, LevelSide, LivingDeathEvent, ModContainer,
     ModFluidTanks, PlayerRef, RandomSource, RegisterCommandsEvent, RunModCommandEvent, Screen,
     ScreenDrawEvent, ScreenEvent, ServerHost, Tag, Text, TooltipEvent,
@@ -357,6 +357,11 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         "evilcraft colossal <pos:block_pos>",
         OPERATOR_LEVEL,
     ));
+    // The Dark Tank's readout: its sixteen-bucket tank.
+    event.commands.push(Command::op(
+        "evilcraft darktank <pos:block_pos>",
+        OPERATOR_LEVEL,
+    ));
     // `<id:id>` is a free `namespace:path` identifier: a `word` argument stops at the
     // colon (the campaign's `item`-argument trap, so no `item` kind here).
     event.commands.push(Command::op(
@@ -369,7 +374,8 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         .push(Command::op("evilcraft held <amount:integer>", 2));
 }
 
-/// `/evilcraft info|blood|damage|infuser|stain|load|held` (`run_mod_command`).
+/// `/evilcraft info|blood|damage|infuser|stain|colossal|darktank|load|held`
+/// (`run_mod_command`).
 pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>) -> Flow {
     let source = event.source;
     let invocation = event.command;
@@ -383,11 +389,13 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
         "infuser" => crate::infuser::readout(host, source, invocation),
         "stain" => crate::stain::readout(host, source, invocation),
         "colossal" => crate::colossal::readout(host, source, invocation),
+        "darktank" => crate::dark_tank::readout(host, source, invocation),
         "load" => crate::infuser::load(host, source, invocation),
         "held" => held(host, source, invocation),
         _ => say(
             host,
-            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|load|held ...".to_owned(),
+            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|darktank|load|held ..."
+                .to_owned(),
         ),
     }
     Flow::Cancel
@@ -669,11 +677,12 @@ pub(crate) fn our_entity(
 }
 
 /// The mod block at `pos` that holds a blood tank — a Blood Chest, a Blood Infuser, a
-/// Colossal Blood Chest or a Blood Stain — with the capacity of its own tank, or a line
-/// saying it holds none.
+/// Colossal Blood Chest, a Blood Stain or a Dark Tank — with the capacity of its own tank,
+/// or a line saying it holds none.
 ///
 /// They share the saved `fluids` shape and the `/evilcraft blood` setter, but not their
-/// size: a stain is upstream's five-bucket splash, the three machines ten.
+/// size: a stain is upstream's five-bucket splash, the three machines ten, the dark tank
+/// sixteen.
 fn tanked(
     host: &mut dyn ServerHost,
     source: &CommandSource,
@@ -688,6 +697,7 @@ fn tanked(
         .and_then(|key| match key.id(host).as_str() {
             CHEST_ID | crate::infuser::INFUSER_ID | crate::runtime::COLOSSAL => Some(TANK_CAPACITY),
             crate::runtime::STAIN => Some(crate::runtime::STAIN_TANK),
+            crate::runtime::DARK_TANK => Some(crate::runtime::DARK_TANK_CAPACITY),
             _ => None,
         });
     match (capacity, host.block_entity(level, pos)) {
@@ -717,6 +727,22 @@ pub(crate) const OPERATOR_LEVEL: u8 = 2;
 /// always carries level 4).
 pub(crate) fn may_read(permission: mod_api::PermissionLevel) -> bool {
     permission.level() >= OPERATOR_LEVEL
+}
+
+/// Vanilla's inventory slot of the off hand: the slot number
+/// `PlayerRef::set_inventory_slot` takes for a click made with it.
+pub(crate) const OFF_HAND_SLOT: u32 = 40;
+
+/// The inventory slot the click's hand holds: the selected hotbar slot for the main hand,
+/// vanilla's off-hand slot for the other. The stain's draw and the dark tank's fill both
+/// write the clicked stack back through it.
+pub(crate) fn hand_slot(host: &dyn Host, player: PlayerRef, hand: Hand) -> Option<u32> {
+    match hand {
+        Hand::Main => player
+            .selected_slot(host)
+            .and_then(|slot| u32::try_from(slot).ok()),
+        Hand::Off => Some(OFF_HAND_SLOT),
+    }
 }
 
 /// The `pos` argument of a command, resolved by the dispatcher against the source.

@@ -238,17 +238,31 @@ pub fn anvil_step(item: &str, tank: i32) -> Option<(&'static str, i32)> {
 /// Upstream inserts the fluid into the item only when it is not empty
 /// (`if (!resource.isEmpty())`), so a broken empty machine drops a plain item that needs
 /// no restoring on placement. A negative amount is not a tank either.
+/// The tank a broken machine's item carries, clamped to the machine's own capacity, or
+/// nothing at all: an empty tank travels on no item, and a negative amount is not a tank.
+#[must_use]
+pub fn carried_tank_with(tank: i32, capacity: i32) -> Option<i32> {
+    (tank > 0).then(|| tank.min(capacity))
+}
+
+/// The tank a broken ten-bucket machine's item carries.
 #[must_use]
 pub fn carried_tank(tank: i32) -> Option<i32> {
-    (tank > 0).then(|| tank.min(TANK_CAPACITY))
+    carried_tank_with(tank, TANK_CAPACITY)
 }
 
 /// The tank a placed item's payload restores, clamped to the machine's capacity
 /// (upstream sets the item's tank capacity first, so the insert cannot pass it; a
-/// `/give`d item naming 20,000 mB places a full 10,000 mB machine).
+/// `/give`d item naming 20,000 mB places a full machine).
+#[must_use]
+pub fn restored_tank_with(carried: i32, capacity: i32) -> i32 {
+    carried.clamp(0, capacity)
+}
+
+/// The tank a placed ten-bucket machine's payload restores.
 #[must_use]
 pub fn restored_tank(carried: i32) -> i32 {
-    carried.clamp(0, TANK_CAPACITY)
+    restored_tank_with(carried, TANK_CAPACITY)
 }
 
 /// Who a mob's death is credited to, as the extractor's rule reads it.
@@ -273,13 +287,20 @@ impl Credit {
     }
 }
 
+/// Empty a blood container into a tank of `capacity`, never past it.
+/// Returns `(tank, what the container keeps)`.
+#[must_use]
+pub fn drain_container_into(tank: i32, container: i32, capacity: i32) -> (i32, i32) {
+    let room = (capacity - tank).max(0);
+    let moved = container.clamp(0, room);
+    (tank + moved, container - moved)
+}
+
 /// Empty a blood container into the chest's tank, never past its capacity.
 /// Returns `(tank, what the container keeps)`.
 #[must_use]
 pub fn drain_container(tank: i32, container: i32) -> (i32, i32) {
-    let room = (TANK_CAPACITY - tank).max(0);
-    let moved = container.clamp(0, room);
-    (tank + moved, container - moved)
+    drain_container_into(tank, container, TANK_CAPACITY)
 }
 
 /// Fill one Blood Extractor from the kill's pool, never past its capacity.
@@ -529,6 +550,43 @@ pub fn colossal_formed(controller: [i32; 3], cell: impl Fn([i32; 3]) -> Shell) -
         }
     }
     (chests == 1).then_some(anchor)
+}
+
+// ---------------------------------------------------------------------------
+// Slice 8: the Dark Tank (`BlockDarkTank`, `BlockEntityDarkTank`)
+// ---------------------------------------------------------------------------
+
+/// `BlockEntityDarkTank.BASE_CAPACITY`: sixteen buckets of blood.
+pub const DARK_TANK_CAPACITY: i32 = 16 * BUCKET;
+/// `BlockDarkTank`: the block, its block entity type and its item's id.
+pub const DARK_TANK: &str = "evilcraft:dark_tank";
+
+/// What one crouching click with a filled Blood Extractor leaves behind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TankFill {
+    /// The tank afterwards, never above [`DARK_TANK_CAPACITY`].
+    pub tank: i32,
+    /// What the extractor keeps.
+    pub extractor: i32,
+    /// How much moved from the extractor into the tank.
+    pub moved: i32,
+}
+
+/// The blood one crouching click moves from a filled Blood Extractor into a Dark Tank, as
+/// upstream's `BlockDarkTank.useItemOn` fills a tank from a held fluid container
+/// (`FluidUtil.interactWithFluidHandler`): as much as the tank has room for, never more
+/// than the extractor holds, so a full tank leaves the extractor untouched and a partly
+/// filled one keeps what did not fit.
+#[must_use]
+pub fn tank_fill(tank: i32, extractor: i32) -> TankFill {
+    let tank = tank.clamp(0, DARK_TANK_CAPACITY);
+    let extractor = extractor.clamp(0, EXTRACTOR_CAPACITY);
+    let (filled, keeps) = drain_container_into(tank, extractor, DARK_TANK_CAPACITY);
+    TankFill {
+        tank: filled,
+        extractor: keeps,
+        moved: extractor - keeps,
+    }
 }
 
 #[cfg(test)]
@@ -1144,5 +1202,74 @@ mod tests {
             3
         );
         assert_eq!((INFUSER_SLOTS, UPGRADE_SLOTS), (7, 4));
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 8: the Dark Tank
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_dark_tank_holds_sixteen_buckets() {
+        // `BlockEntityDarkTank.BASE_CAPACITY = 16000`, twice the machines' ten buckets.
+        assert_eq!(DARK_TANK_CAPACITY, 16_000);
+        assert_eq!(DARK_TANK, "evilcraft:dark_tank");
+        assert_eq!(DARK_TANK_CAPACITY, 2 * TANK_CAPACITY - 4_000);
+    }
+
+    #[test]
+    fn a_filled_extractor_empties_into_a_dark_tank() {
+        let fill = tank_fill(0, EXTRACTOR_CAPACITY);
+        assert_eq!(
+            (fill.moved, fill.tank, fill.extractor),
+            (EXTRACTOR_CAPACITY, EXTRACTOR_CAPACITY, 0),
+            "a 5,000 mB extractor fits a fresh 16,000 mB tank whole"
+        );
+    }
+
+    #[test]
+    fn a_dark_tank_takes_only_its_room_and_the_extractor_keeps_the_rest() {
+        let fill = tank_fill(14_000, 5_000);
+        assert_eq!(fill.moved, 2_000, "the tank had room for 2,000 mB");
+        assert_eq!(fill.tank, DARK_TANK_CAPACITY);
+        assert_eq!(
+            fill.extractor, 3_000,
+            "the extractor keeps what did not fit"
+        );
+    }
+
+    #[test]
+    fn a_full_dark_tank_or_an_empty_extractor_moves_nothing() {
+        let full = tank_fill(DARK_TANK_CAPACITY, EXTRACTOR_CAPACITY);
+        assert_eq!(
+            (full.moved, full.tank, full.extractor),
+            (0, DARK_TANK_CAPACITY, EXTRACTOR_CAPACITY)
+        );
+        let empty = tank_fill(1_000, 0);
+        assert_eq!((empty.moved, empty.tank, empty.extractor), (0, 1_000, 0));
+    }
+
+    #[test]
+    fn a_doctored_dark_tank_is_read_at_its_own_capacity() {
+        // A saved amount above its capacity (a `/give`d payload) is the capacity, and a
+        // click can add nothing to a tank that is already full.
+        let fill = tank_fill(20_000, 5_000);
+        assert_eq!((fill.moved, fill.tank), (0, DARK_TANK_CAPACITY));
+    }
+
+    #[test]
+    fn a_dark_tank_payload_carries_sixteen_buckets_and_comes_back_clamped() {
+        assert_eq!(carried_tank_with(12_000, DARK_TANK_CAPACITY), Some(12_000));
+        assert_eq!(
+            carried_tank_with(20_000, DARK_TANK_CAPACITY),
+            Some(DARK_TANK_CAPACITY)
+        );
+        assert_eq!(carried_tank_with(0, DARK_TANK_CAPACITY), None);
+        assert_eq!(
+            restored_tank_with(20_000, DARK_TANK_CAPACITY),
+            DARK_TANK_CAPACITY
+        );
+        assert_eq!(restored_tank_with(12_000, DARK_TANK_CAPACITY), 12_000);
+        // The ten-bucket machines keep their own clamp.
+        assert_eq!(carried_tank(20_000), Some(TANK_CAPACITY));
     }
 }
