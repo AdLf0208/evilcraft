@@ -3005,3 +3005,164 @@ The remaining ladder rows, the artifact, the in-game transcript and the gates ar
 ### Skills
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 14 — the Undead Wood set (0.2.14)
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+The registry entry, the PR and the ledger stay the orchestrator's. The full design and the
+alternatives considered are in `tools/slice14-plan.md`.
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap 7, verbatim:
+
+> No blood stain, colossal chest, purifier, dark ore, **undead wood**, spirits/vengeance,
+> werewolves, promises/bowls, brooms, or the environmental accumulator — the rest of the jar.
+
+**Tier:** `deep` still governs the port; this slice is the `data`/`content` half of it — eleven
+block registrations, the jar's models, textures, tags, self-drop loot tables and its own seven
+crafting recipes, in 26.3's data dialect. No block entity, machine, renderer, entity or
+dimension; `reinforced_undead_planks` is already carried for the Colossal shell and is **not**
+duplicated. Self-contained, no parent mod, no new hook.
+
+### The jar's id inventory (enumerated from the jar, not the brief)
+
+`unzip -l evilcraft-1.21.1-neoforge-1.2.100.jar | grep -i undead`: every id the brief names
+is present. The eleven carried blocks: `undead_log`, `undead_log_stripped`, `undead_wood`,
+`undead_wood_stripped`, `undead_planks`, `undead_planks_stairs`, `undead_slab`, `undead_fence`,
+`undead_fence_gate`, `undead_leaves`, `undead_sapling`. The jar also contains
+`reinforced_undead_planks_stairs` (not in the brief — left for the shell's later slice) and
+`data/evilcraft/worldgen/configured_feature/tree_undead.json` (worldgen is inert at this pin).
+The jar's `data/evilcraft/tags/{block,item}/undead_logs.json` (four logs each) and its
+`minecraft:mineable/axe` list name these blocks; both are carried.
+
+### What is in it
+
+The jar's own **eleven blockstates**, its **block and item models** (the Sapling's item model
+alone has its absent `cyclopscore:item/flat` parent changed to `minecraft:item/generated`),
+its **seven block textures**, the two `undead_logs` tags and the `undead_*` entries of its
+`mineable/axe` tag — all byte for byte. The jar's **seven crafting recipes**, with only the
+1.21.1 ingredient objects flattened to 26.3's bare strings:
+
+| file | shape and ingredient | output |
+|---|---|---|
+| `undead_planks` | shapeless, `#evilcraft:undead_logs` | 4 |
+| `undead_wood` / `undead_wood_stripped` | shapeless, 4 of the matching log | 3 each |
+| `undead_planks_stairs` | shaped, 6 planks | 4 |
+| `undead_slab` | shaped, 3 planks | 6 |
+| `undead_fence` | shaped, 2 planks + 2 sticks | 3 |
+| `undead_fence_gate` | shaped, 2 planks + 2 sticks | 1 |
+
+The jar's other undead recipes (`base/undead_sapling`, `base/reinforced_undead_planks`,
+`broom_part_rod_undead`) are an infusion and an add-on-family recipe, not this slice's
+crafting set, and are not carried.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice14.log` (four rules stubbed to empty/`None`):
+
+```
+test result: FAILED. 84 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out
+---- runtime::tests::every_carried_wood_recipe_yields_its_jar_count stdout ----
+  left: None  right: Some(("evilcraft:undead_planks", 4))
+---- runtime::tests::the_planks_recipe_yields_four_from_one_log stdout ----
+  left: None  right: Some(("evilcraft:undead_planks", 4))
+---- runtime::tests::the_undead_logs_tag_names_exactly_the_four_logs stdout ----
+  left: []  right: ["evilcraft:undead_log", "evilcraft:undead_wood", "evilcraft:undead_log_stripped", "evilcraft:undead_wood_stripped"]
+---- runtime::tests::the_wood_set_adds_eleven_ids_and_no_reinforced_planks_duplicate stdout ----
+  left: 0  right: 11
+```
+
+Green: `sdk-test.log` — **88 passed, 0 failed** (84 + 4); `sdk-clippy.log` —
+`cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (build-slot leases; compile steps forwarded to AdLf-PC, game legs local)
+
+All ladders rows, the artifact and the in-game legs are recorded in `VALIDATION.md` § Slice 14.
+
+### The in-game leg (fail-capable)
+
+`ports/tools/launcher-game.sh build evilcraft` → `native-0a875da-1bac1c969e7b`, log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/`, `assets/` and `horizon-mod.toml`
+are byte-identical to the port (`diff -r`/`cmp` empty). New phases **AM** and **AN**:
+
+```
+== AM: the undead log is given, placed with its axis from the clicked face, and an unknown id is refused ==
+  evilcraft:undead_log given 1: the parsed inventory count is 1
+  placed at 200,101,0: name 'evilcraft:undead_log', axis 'y'
+  the same item against an east face: name 'evilcraft:undead_log', axis 'x'
+  {"error":"unknown item evilcraft:no_such_wood"}
+== AN: every carried undead-wood recipe is crafted the way its jar file declares ==
+  -- undead_planks --
+  recipe undead_planks.json: crafting_shapeless -> {"count": 4, "item": "evilcraft:undead_planks", "slot": 200}
+    the result reached the inventory (4 evilcraft:undead_planks), the grid emptied, and evilcraft:undead_log was consumed
+  vanilla control: {… "drops": {"minecraft:crafting_table": 1} …}
+  evilcraft:undead_log: {… "drops": {"evilcraft:undead_log": 1}, "block_before": "evilcraft:undead_log[axis=y]" …}
+  -- undead_wood .. undead_fence_gate --
+  each recipe: the declared id/count, the grid emptied, the ingredient consumed
+```
+
+**Fail-capable three ways.** (1) `SELFTEST=wood` inverts AM's block-name equality and exits 1
+(*SELFTEST flipped: the block name is evilcraft:undead_log, as it should*). (2) AM's two
+placements are the face differential: the same item on the floor's down face reads `axis=y`,
+against a west neighbour's face it reads `axis=x` (a log's RotatedPillarBlock axis follows the
+clicked face). (3) The whole-package control has no undead log at all, so AM cannot give it.
+The seven recipes are each proved through a real crafting table by the campaign's
+`check_261_dialect.py prove` harness, which asserts the output id and count, that the grid
+emptied and that the declared ingredient was consumed; the planks proof also breaks a log with
+a vanilla crafting-table control beside it.
+
+### Harness facts learned here
+
+1. **`ctl place` chooses the face itself.** It aims at the first solid neighbour in the
+   agent's `down, up, north, south, west, east` order (`horizon-client/game/agent.rs`), not at
+   the crosshair. The arena floor under every cell wins with the down face (`axis=y`); to prove
+   the horizontal axis, clear the floor under the target and leave only a side neighbour.
+2. **A shapeless recipe's tag ingredient resolves in the proof spec's `items` map**, not
+   `tag_items` (the latter is only consulted for a shaped recipe's `key`). The spec uses
+   `{"items": {"0": "evilcraft:undead_log"}}` for `undead_planks`.
+3. **The default leg flaked four times under load** — Q's bow kill twice, AE's dark-tank break
+   once and the first AM side placement once. Each flake log is kept beside the green one
+   (`e2e-launcher-0.2.14-attempt{1..5}.log`); no assertion was weakened. The sixth run was green.
+4. **The launcher's global native-build lock** (`.build.lock` under `horizon-launcher/`) is held
+   by other agents' builds; the build waited for both launcher locks with `flock -n` before
+   invoking `launcher-game.sh build` (the campaign's "retry against `flock -n`" rule).
+
+### Deviations this slice adds
+
+1. **Self-drop loot tables, not the jar's conditional ones.** The jar's leaves table uses 1.21.1
+   `conditions` arrays (shears/silk-touch alternatives, fortune chances), the slab uses a
+   `conditions` array inside `set_count`, and the fence uses `survives_explosion` — all fatal in
+   26.3's dialect. Each is replaced by the minimal single-pool self-drop the checker accepts;
+   the leaves no longer drop dead bushes/sticks and a double slab drops one. The jar's byte
+   inventory, the converted recipe bytes and this deviation are recorded in `LICENSE-NOTICE.md`.
+2. **No undead tree worldgen.** `tree_undead` is a configured feature upstream; worldgen is
+   inert at this pin. The sapling's `random_ticks` is off (the jar's leaves likewise do not
+   decay) so neither block performs a tree/growth tick it cannot complete.
+3. **Templates approximate the Java class.** Logs/wood use `minecraft:oak_log` (the jar's
+   `RotatedPillarBlock` with `axis`), planks use `minecraft:stone`, stairs/slab/fence/gate use the
+   vanilla stone-stairs/slab, oak-fence and oak-fence-gate templates, leaves `minecraft:oak_leaves`
+   and the sapling `minecraft:poppy`; each with the jar's hardness, resistance, sounds and
+   map colour. Fire spread, flammability, compostability and the axe-strip listener have no
+   content surface here.
+4. **The sapling's item model parent changed** from the jar's absent `cyclopscore:item/flat` to
+   `minecraft:item/generated`; the texture is the jar's own.
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| 11 undead wood blocks, items, blockstates, models, textures, lang, creative tab | tested | AM: `ctl give` + `ctl place` read back `evilcraft:undead_log` with `axis=y` and `axis=x` |
+| `minecraft:mineable/axe` for all 11 | tested | the planks proof's log breaks with an iron pickaxe, with a vanilla-table control |
+| seven crafted recipes (`undead_planks`, `undead_wood`, `undead_wood_stripped`, stairs, slab, fence, gate) | tested | AN: each output id/count, grid emptied, ingredient consumed through `check_261_dialect.py prove` |
+| `evilcraft:undead_logs` block and item tags | tested | AN: the shapeless planks recipe resolves the tag to the carried log |
+| 11 self-drop loot tables | tested (log) | AN: `evilcraft:undead_log` self-drops beside the vanilla control; the other ten use the same data shape |
+| `evilcraft:no_such_wood` refusal | tested | AM: `{"error":"unknown item evilcraft:no_such_wood"}` |
+| axe-strip (log/wood → stripped), fire spread, compostability | not ported | no content surface; deviation 3 |
+| `tree_undead` configured feature / sapling growth | not ported | worldgen inert at this pin; deviation 2 |
+| jar's conditional leaves/slab/fence loot functions | not ported (converted) | deviation 1; 26.3 dialect gate |
+| jar's `base/undead_sapling`, `base/reinforced_undead_planks`, `broom_part_rod_undead` recipes | not ported | add-on/infuser families outside this slice's crafting set |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port

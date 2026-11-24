@@ -1,0 +1,7 @@
+{
+  "recipe": {
+    "file": "data/evilcraft/recipe/crafting/undead_wood.json",
+    "expect": { "id": "evilcraft:undead_wood", "count": 3 },
+    "consume": "evilcraft:undead_log"
+  }
+}

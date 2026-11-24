@@ -1,6 +1,6 @@
 id = "evilcraft"
 name = "EvilCraft"
-version = "0.2.13"
+version = "0.2.14"
 description = """A port of EvilCraft's blood economy for Horizon: the Blood Extractor fills with
 the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), a mob that dies from
 fall damage leaves a Blood Stain holding 20 mB for each point of its max health, a crouching
@@ -14,7 +14,9 @@ repair while the shell is open. The Purifier is its three-bucket counterpart for
 puts an item in its purge slot, and sixty ticks and one bucket of blood strip a curse from it —
 except from the Vengeance Pickaxe, whose own curse is immune to that action. All five blocks keep
 their blood when broken: the dropped item carries the tank, and placing it again fills the block
-back, clamped to its own capacity."""
+back, clamped to its own capacity. The Undead Wood set — logs and wood (both stripped),
+planks, stairs, slab, fence, fence gate, leaves and sapling — is carried with the jar's own
+seven crafting recipes; Undead Planks are crafted four at a time from an undead log."""
 authors = ["rubensworks (kroeser)", "AdLf0208"]
 # A native mod: Rust in src/, compiled by the launcher against the game build [native] pins,
 # beside data/ and assets/. The id is the resource namespace and the only identity.

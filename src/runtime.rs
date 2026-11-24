@@ -817,6 +817,73 @@ pub fn comparator_strength(stored: i32, capacity: i32) -> i32 {
     strength.clamp(0, 15) as i32
 }
 
+// ---- Slice 14: the undead wood set (the jar's own ids and seven crafting recipes) ----
+
+/// The ids this slice adds. `reinforced_undead_planks` is not here: slice 7 already
+/// carries it for the Colossal Blood Chest's shell.
+#[must_use]
+pub fn carried_wood_ids() -> &'static [&'static str] {
+    &[
+        "evilcraft:undead_log",
+        "evilcraft:undead_log_stripped",
+        "evilcraft:undead_wood",
+        "evilcraft:undead_wood_stripped",
+        "evilcraft:undead_planks",
+        "evilcraft:undead_planks_stairs",
+        "evilcraft:undead_slab",
+        "evilcraft:undead_fence",
+        "evilcraft:undead_fence_gate",
+        "evilcraft:undead_leaves",
+        "evilcraft:undead_sapling",
+    ]
+}
+
+/// The four members of the jar's `evilcraft:undead_logs` block and item tags.
+#[must_use]
+pub fn undead_logs_tag() -> &'static [&'static str] {
+    &[
+        "evilcraft:undead_log",
+        "evilcraft:undead_wood",
+        "evilcraft:undead_log_stripped",
+        "evilcraft:undead_wood_stripped",
+    ]
+}
+
+/// A carried wood recipe's declared output: `(id, count)` by the recipe's file stem.
+/// Every entry is the jar's own `data/evilcraft/recipe/crafting/<file>.json` result.
+#[must_use]
+pub fn wood_recipe(file: &str) -> Option<(&'static str, u32)> {
+    const RECIPES: &[(&str, &str, u32)] = &[
+        ("undead_planks", "evilcraft:undead_planks", 4),
+        ("undead_wood", "evilcraft:undead_wood", 3),
+        ("undead_wood_stripped", "evilcraft:undead_wood_stripped", 3),
+        ("undead_planks_stairs", "evilcraft:undead_planks_stairs", 4),
+        ("undead_slab", "evilcraft:undead_slab", 6),
+        ("undead_fence", "evilcraft:undead_fence", 3),
+        ("undead_fence_gate", "evilcraft:undead_fence_gate", 1),
+    ];
+    RECIPES
+        .iter()
+        .find(|(stem, _, _)| *stem == file)
+        .map(|(_, id, count)| (*id, *count))
+}
+
+/// The ingredient a carried wood recipe declares, as the bare 26.3 string the data
+/// uses (`#tag` for a tag ingredient). One entry per recipe's distinct ingredient;
+/// the shaped fences and the gate take sticks as their other ingredient.
+#[must_use]
+pub fn wood_recipe_input(file: &str) -> Option<&'static str> {
+    match file {
+        "undead_planks" => Some("#evilcraft:undead_logs"),
+        "undead_wood" => Some("evilcraft:undead_log"),
+        "undead_wood_stripped" => Some("evilcraft:undead_log_stripped"),
+        "undead_planks_stairs" | "undead_slab" | "undead_fence" | "undead_fence_gate" => {
+            Some("evilcraft:undead_planks")
+        }
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1791,5 +1858,62 @@ mod tests {
         );
         // `ItemStack.enchant` raises an existing curse, it does not duplicate it.
         assert_eq!(add_curse(&after, "minecraft:vanishing_curse", 1), after);
+    }
+
+    // ---- Slice 14: the undead wood set ----
+
+    #[test]
+    fn the_planks_recipe_yields_four_from_one_log() {
+        assert_eq!(
+            wood_recipe("undead_planks"),
+            Some(("evilcraft:undead_planks", 4))
+        );
+        assert_eq!(
+            wood_recipe_input("undead_planks"),
+            Some("#evilcraft:undead_logs")
+        );
+        assert!(
+            undead_logs_tag().contains(&"evilcraft:undead_log"),
+            "the tag must resolve to the carried log"
+        );
+    }
+
+    #[test]
+    fn every_carried_wood_recipe_yields_its_jar_count() {
+        for (file, id, count) in [
+            ("undead_planks", "evilcraft:undead_planks", 4),
+            ("undead_wood", "evilcraft:undead_wood", 3),
+            ("undead_wood_stripped", "evilcraft:undead_wood_stripped", 3),
+            ("undead_planks_stairs", "evilcraft:undead_planks_stairs", 4),
+            ("undead_slab", "evilcraft:undead_slab", 6),
+            ("undead_fence", "evilcraft:undead_fence", 3),
+            ("undead_fence_gate", "evilcraft:undead_fence_gate", 1),
+        ] {
+            assert_eq!(wood_recipe(file), Some((id, count)), "{file}");
+        }
+    }
+
+    #[test]
+    fn the_undead_logs_tag_names_exactly_the_four_logs() {
+        assert_eq!(
+            undead_logs_tag(),
+            &[
+                "evilcraft:undead_log",
+                "evilcraft:undead_wood",
+                "evilcraft:undead_log_stripped",
+                "evilcraft:undead_wood_stripped",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_wood_set_adds_eleven_ids_and_no_reinforced_planks_duplicate() {
+        assert_eq!(carried_wood_ids().len(), 11);
+        assert!(carried_wood_ids().contains(&"evilcraft:undead_log"));
+        assert!(carried_wood_ids().contains(&"evilcraft:undead_sapling"));
+        assert!(
+            !carried_wood_ids().contains(&"evilcraft:reinforced_undead_planks"),
+            "reinforced planks are already carried by slice 7"
+        );
     }
 }

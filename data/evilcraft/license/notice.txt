@@ -20,7 +20,8 @@ same:
 The README is the narrower, more specific grant and it is the one that covers the **carried
 textures** — the Blood Extractor's, the Promise's, the Blood Stain's, the Blood Chest's, the
 Blood Infuser's, the Colossal Blood Chest's, the Reinforced Undead Planks', the Dark Tank's, the
-**Blook's** and the **Purifier's** (`assets/evilcraft/textures/{item,block}/*.png`, the block
+**Blook's**, the **Purifier's**, the **Vengeance Pickaxe's** and the **Undead Wood set's seven**
+(`assets/evilcraft/textures/{item,block}/*.png`, the block
 files including the chest's `blood_chest.png`, the upstream file of `colossal_blood_chest.png`).
 This port therefore distributes under **CC BY 4.0**, which requires attribution, and keeps the
 MIT grant on record as the build metadata's alternative.
@@ -45,7 +46,20 @@ MIT grant on record as the build metadata's alternative.
     `input_item`, `input_fluid`, `output_item`, `duration`, `xp` and `tier` are unedited);
   - the Blood Stain's blockstate and its three block models, the Purifier's blockstate, the
     Dark Tank's item model, and the `minecraft:replaceable` block tag (`data/minecraft/tags/
-    block/replaceable.json`), all byte for byte.
+    block/replaceable.json`), all byte for byte;
+  - the Vengeance Pickaxe's item model (`assets/evilcraft/models/item/vengeance_pickaxe.json`,
+    101 B) and its 254 B texture, both byte for byte from the jar (0.2.11);
+  - **the Undead Wood set (0.2.14)**: the jar's eleven `undead_*` blockstates and its
+    block and item models (the Sapling's item model alone has its absent
+    `cyclopscore:item/flat` parent changed to `minecraft:item/generated`), and the seven
+    block textures (`undead_log`, `undead_log_top`, `undead_log_stripped`,
+    `undead_log_top_stripped`, `undead_planks`, `undead_leaves`, `undead_sapling.png`),
+    all byte for byte; the two `evilcraft:undead_logs` tags, byte for byte; and the
+    eleven `undead_*` names in the jar's `minecraft:mineable/axe` tag. The **seven**
+    crafting recipes whose ingredients were flattened from the jar's `{"item": …}` /
+    `{"tag": …}` objects to 26.3's bare strings are the jar's own id, shape and count —
+    the only change is that ingredient spelling; the self-drop loot tables are written
+    by this port because the jar's conditional 1.21.1 shapes are not in the 26.3 dialect.
   Every other blockstate, model, item definition, loot table, menu, tag and language file is
   written by this port.
 - **Licence of this port:** CC BY 4.0 (© 2026 the Horizon port authors), with the original

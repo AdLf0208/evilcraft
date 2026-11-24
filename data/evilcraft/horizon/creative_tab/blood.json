@@ -13,7 +13,18 @@
     "evilcraft:vengeance_pickaxe",
     "evilcraft:promise_tier_1",
     "evilcraft:promise_tier_2",
-    "evilcraft:promise_tier_3"
+    "evilcraft:promise_tier_3",
+    "evilcraft:undead_log",
+    "evilcraft:undead_log_stripped",
+    "evilcraft:undead_wood",
+    "evilcraft:undead_wood_stripped",
+    "evilcraft:undead_planks",
+    "evilcraft:undead_planks_stairs",
+    "evilcraft:undead_slab",
+    "evilcraft:undead_fence",
+    "evilcraft:undead_fence_gate",
+    "evilcraft:undead_leaves",
+    "evilcraft:undead_sapling"
   ],
   "title": "itemGroup.evilcraft"
 }

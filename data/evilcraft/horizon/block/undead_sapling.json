@@ -1,0 +1,11 @@
+{
+  "item": true,
+  "template": "minecraft:poppy",
+  "properties": {
+    "hardness": 0.0,
+    "explosion_resistance": 0.0,
+    "sounds": "minecraft:grass_block",
+    "occludes": false,
+    "random_ticks": false
+  }
+}

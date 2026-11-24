@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "evilcraft:undead_log_stripped",
+    "evilcraft:undead_log_stripped",
+    "evilcraft:undead_log_stripped",
+    "evilcraft:undead_log_stripped"
+  ],
+  "result": {
+    "id": "evilcraft:undead_wood_stripped",
+    "count": 3
+  }
+}

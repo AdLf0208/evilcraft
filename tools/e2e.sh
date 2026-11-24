@@ -179,8 +179,9 @@
 # SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour,
 # SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=vengeance flips AJ's immunity,
 # SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split,
-# SELFTEST=comparator flips AK's 2,000 mB reading, and SELFTEST=curse flips AL's roll-0
-# assertion (each must FAIL), proving the scenarios can fail.
+# SELFTEST=comparator flips AK's 2,000 mB reading, SELFTEST=curse flips AL's roll-0
+# assertion and SELFTEST=wood flips AM's block-name equality (each must FAIL),
+# proving the scenarios can fail.
 # Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
@@ -2619,4 +2620,77 @@ echo "  roll 9999: damage $NO_DAMAGE_BEFORE -> $NO_DAMAGE_AFTER, tank $NO_TANK_B
     || fail "roll 9999 repaired without spending blood ($NO_TANK_BEFORE -> $TANK)"
 echo "  the same tool, chest, tank and 40 ticks: roll 0 curses, roll 9,999 stays clean (the gate is roll == 0)"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0, and the Blood Chest's non-bulk repair adds minecraft:vanishing_curse@1 at forced roll 0 while the same tool, chest, tank and ticks at roll 9,999 stay clean and both repair and spend blood"
+# ---- Slice 14: the undead wood set (data, the jar's own recipes) ----
+echo "== AM: the undead log is given, placed with its axis from the clicked face, and an unknown id is refused =="
+LOG=evilcraft:undead_log
+WOOD_X=$X0; WOOD_Y=101; WOOD_Z=0
+ctl command "clear @s" >/dev/null
+ctl wait 4 >/dev/null
+ctl give "$LOG" 1 >/dev/null
+ctl wait 4 >/dev/null
+WOOD_INV=$(ctl inventory | jq -r --arg i "$LOG" '.counts[$i] // 0')
+echo "  $LOG given 1: the parsed inventory count is $WOOD_INV"
+[ "$WOOD_INV" = 1 ] || fail "giving $LOG 1 left $WOOD_INV in the inventory, expected exactly 1"
+# The up face of the floor below gives axis=y, and the block must be the carried log.
+ctl command "execute in minecraft:the_end run setblock $WOOD_X 100 $WOOD_Z minecraft:stone" >/dev/null
+ctl command "execute in minecraft:the_end run setblock $WOOD_X $WOOD_Y $WOOD_Z minecraft:air" >/dev/null
+ctl command "execute in minecraft:the_end run tp @s $((WOOD_X - 2)).5 101 $((WOOD_Z + 1)).5" >/dev/null
+ctl wait 6 >/dev/null
+ctl look-at-block "$WOOD_X" 100 "$WOOD_Z" up >/dev/null 2>&1 || true
+reply=$(ctl place "$WOOD_X" "$WOOD_Y" "$WOOD_Z" --item "$LOG" 2>&1) \
+    || fail "ctl place $LOG failed: $(tr -d '\n' <<<"$reply" | cut -c1-200)"
+ctl wait 10 >/dev/null
+WOOD_NAME=$(block_name "$WOOD_X" "$WOOD_Y" "$WOOD_Z")
+WOOD_AXIS=$(block_prop "$WOOD_X" "$WOOD_Y" "$WOOD_Z" axis)
+echo "  placed at $WOOD_X,$WOOD_Y,$WOOD_Z: name '$WOOD_NAME', axis '$WOOD_AXIS'"
+[ "$WOOD_NAME" = "$LOG" ] || fail "the placed block is '$WOOD_NAME', expected $LOG"
+if [ "$SELFTEST" = wood ]; then
+    echo "  SELFTEST: asserting the block name is NOT $LOG (this must fail)"
+    [ "$WOOD_NAME" != "$LOG" ] \
+        || fail "SELFTEST flipped: the block name is $WOOD_NAME, as it should"
+fi
+[ "$WOOD_AXIS" = y ] || fail "a log placed on the up face has axis '$WOOD_AXIS', expected y"
+# The same item against a vertical face takes a horizontal axis: the state comes
+# from the click, not from a constant in the block declaration. Give a second log
+# first — the first placement consumed the one the inventory assertion just read.
+ctl give "$LOG" 1 >/dev/null
+ctl wait 4 >/dev/null
+WOOD_SIDE_Z=2
+# `ctl place` picks the FIRST solid neighbour face in down/up/north/south/west/east
+# order (horizon-client agent.rs FACES), not where we aim. The arena floor under
+# every cell would win with the down face (axis y), so clear it here and leave only
+# the west neighbour — the log then attaches to a horizontal face (axis x).
+ctl command "execute in minecraft:the_end run setblock $WOOD_X 100 $WOOD_SIDE_Z minecraft:air" >/dev/null
+ctl command "execute in minecraft:the_end run setblock $((WOOD_X - 1)) $WOOD_Y $WOOD_SIDE_Z minecraft:stone" >/dev/null
+ctl command "execute in minecraft:the_end run setblock $WOOD_X $WOOD_Y $WOOD_SIDE_Z minecraft:air" >/dev/null
+ctl command "execute in minecraft:the_end run tp @s $((WOOD_X + 2)).5 101 $((WOOD_SIDE_Z + 1)).5" >/dev/null
+ctl wait 6 >/dev/null
+ctl look-at-block $((WOOD_X - 1)) $WOOD_Y $WOOD_SIDE_Z east >/dev/null 2>&1 || true
+reply=$(ctl place "$WOOD_X" "$WOOD_Y" "$WOOD_SIDE_Z" --item "$LOG" 2>&1) \
+    || fail "ctl place $LOG against a side face failed: $(tr -d '\n' <<<"$reply" | cut -c1-200)"
+ctl wait 10 >/dev/null
+SIDE_NAME=$(block_name "$WOOD_X" "$WOOD_Y" "$WOOD_SIDE_Z")
+SIDE_AXIS=$(block_prop "$WOOD_X" "$WOOD_Y" "$WOOD_SIDE_Z" axis)
+echo "  the same item against an east face: name '$SIDE_NAME', axis '$SIDE_AXIS'"
+[ "$SIDE_NAME" = "$LOG" ] || fail "the side-placed block is '$SIDE_NAME', expected $LOG"
+[ "$SIDE_AXIS" = x ] || fail "a log placed against an east face has axis '$SIDE_AXIS', expected x"
+# An unknown id is refused, not handed out as a nameless stack.
+UNKNOWN_WOOD=$(ctl give evilcraft:no_such_wood 1 2>&1) && \
+    fail "evilcraft:no_such_wood was given: $UNKNOWN_WOOD"
+echo "  $(tr -d '\n' <<<"$UNKNOWN_WOOD" | cut -c1-160)"
+
+echo "== AN: every carried undead-wood recipe is crafted the way its jar file declares =="
+# The campaign's dialect prover drives a real crafting table: it gives the declared
+# ingredients, places them in the grid, asserts the output id/count, shift-clicks the
+# result into the inventory and checks the ingredients were consumed. One spec per
+# recipe, so every recipe family has its own table and proof, not just the planks.
+for proof in undead_planks undead_wood undead_wood_stripped undead_planks_stairs undead_slab undead_fence undead_fence_gate; do
+    echo "  -- $proof --"
+    python3 "$PORT/../tools/check_261_dialect.py" prove \
+        --sock "$SOCK" --ctl "$CTL" --table "$X0" 101 6 \
+        --spec "$PORT/tools/wood-proof-$proof.json" \
+        || fail "the $proof proof failed"
+done
+echo "  all seven jar recipes: declared output, count, consumed ingredients and a dropped log"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0, and the Blood Chest's non-bulk repair adds minecraft:vanishing_curse@1 at forced roll 0 while the same tool, chest, tank and ticks at roll 9,999 stay clean and both repair and spend blood, an undead log given once reads back as exactly one in the parsed inventory, placed on a floor's up face reads evilcraft:undead_log with axis y and against an east face reads axis x while evilcraft:no_such_wood is refused, and all seven jar recipes (planks x4 from the undead-logs tag, wood x3 from four logs, stripped wood x3 from four stripped logs, stairs x4 from six planks, slab x6 from three planks, fence x3 and gate x1 from planks and sticks) craft their declared output and count with the ingredients consumed and an undead log drops itself when broken"

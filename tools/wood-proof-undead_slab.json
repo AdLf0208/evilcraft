@@ -1,0 +1,7 @@
+{
+  "recipe": {
+    "file": "data/evilcraft/recipe/crafting/undead_slab.json",
+    "expect": { "id": "evilcraft:undead_slab", "count": 6 },
+    "consume": "evilcraft:undead_planks"
+  }
+}

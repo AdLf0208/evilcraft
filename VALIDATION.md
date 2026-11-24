@@ -743,3 +743,37 @@ Harness fact worth keeping: **fund the chest only after setting the damage**. A 
 repaired a damage-250 pickaxe to 242 during the 12 ticks the setup readout waits (measured on the
 first AL run), so a scenario that asserts the starting damage must use an unfunded chest until the
 readout has confirmed it.
+
+## Slice 14 (0.2.14) — the Undead Wood set
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job W1-evilcraft --port ports/evilcraft` were forwarded
+to **AdLf-PC** (`build-slot: forwarding … to the remote runner`); the launcher build and the e2e
+legs stayed local. `CARGO_INCREMENTAL=0`, no `--target-dir`, no `BUILD_LOCAL=1`, no raised slots.
+Full rule, red proof, transcript and coverage: `notes.md` § **Slice 14**.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (four rules stubbed) | **FAILED. 84 passed; 4 failed** (`EXIT:101`) | `sdk-test-red-slice14.log` |
+| tests (green) | `cargo test` | **88 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings (`FMT_EXIT:0`, `CLIPPY_EXIT:0`) | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 629 API uses, 23 hooks, `EXIT:0` | `sdk-project-check.log` |
+| data dialect | `python3 ports/tools/check_261_dialect.py ports/evilcraft/data` | all 21 recipe/loot files in the 26.3 dialect | job report |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **267,707 B** `1996cd5d…579b03`, **`CMP-IDENTICAL`**, 209 entries, no `Cargo.lock` | `sdk-build-a/b-0.2.14.log`, `sdk-build-cmp-0.2.14.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, 267,707 B, same sha, `CHECK_EXIT:0` | `sdk-check-fits-0.2.14.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `FIT_PIN_EXIT:0` | `sdk-check-fits-0.2.14.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `FIT_OTHER_EXIT:0` | `sdk-check-fits-0.2.14.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** — 88 tests, 0 clippy warnings, runtime byte-identical, package matches the tree, R9 clean, check + fits, Skills gate PASS | `sdk-artifact-0.2.14.txt` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-1bac1c969e7b`, `Compiling evilcraft (1 of 1)`; export byte-identical to the port | `launcher-build-0.2.14.log` |
+
+The in-game legs (default, control, `SELFTEST=wood`) plus five kept flake logs:
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`) | **`PASS` + `EXIT:0`** — A, A2, B–F, D2, D3, E2, H–W, Y, Y2, Z, AA–AI, AK, AL, **AM, AN** | `e2e-launcher-0.2.14.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.14.log` |
+| selftest (this slice) | `SELFTEST=wood` | **`FAIL` + `EXIT:1`** at AM — *SELFTEST flipped: the block name is evilcraft:undead_log, as it should* | `e2e-launcher-selftest-wood-0.2.14.log` |
+| flakes (kept) | default attempts 1–3 and selftest attempt 1 | `EXIT:1` at the AM face placement, Q's bow kill, AE's tank break and Q again | `e2e-launcher-0.2.14-attempt{1,2,3}.log`, `e2e-launcher-selftest-wood-0.2.14-flake1.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=34 ok=34 missing-exit=0
+bad-exit=0` (exit 0): the 25 earlier legs stay green and the nine new logs are this slice's.

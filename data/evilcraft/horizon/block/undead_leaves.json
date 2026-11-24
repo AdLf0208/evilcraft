@@ -1,0 +1,11 @@
+{
+  "item": true,
+  "template": "minecraft:oak_leaves",
+  "properties": {
+    "hardness": 0.5,
+    "explosion_resistance": 0.5,
+    "sounds": "minecraft:gravel",
+    "occludes": false,
+    "random_ticks": false
+  }
+}

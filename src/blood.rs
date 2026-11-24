@@ -23,7 +23,7 @@ use mod_api::{
 };
 
 use crate::runtime::{
-    BAD_ENCHANT_CHANCE, BLOOD, CHEST_SLOTS, CONTAINER_SLOT, Credit, CURSES, EXTRACTOR,
+    BAD_ENCHANT_CHANCE, BLOOD, CHEST_SLOTS, CONTAINER_SLOT, CURSES, Credit, EXTRACTOR,
     EXTRACTOR_CAPACITY, SLOT_COUNT, TANK_CAPACITY, add_curse, anvil_stack_step, bad_enchant_roll,
     blood_from_kill, can_hold, curse_level, drain_container, fill_extractor, kill_span,
     legacy_extractors, one_extractor, repair, repair_due, rolled_curse,
@@ -660,7 +660,10 @@ fn set_curse(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
         return;
     };
     if !may_read(source.permission()) {
-        say(host, format!("evilcraft curse needs an operator (permission level {OPERATOR_LEVEL})"));
+        say(
+            host,
+            format!("evilcraft curse needs an operator (permission level {OPERATOR_LEVEL})"),
+        );
         return;
     }
     if our_entity(host, source, pos, CHEST_ID, "Blood Chest").is_none() {
@@ -671,15 +674,23 @@ fn set_curse(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
         crate::curse::set_forced(pos, 0, 0, true)
     } else {
         u32::try_from(roll).is_ok_and(|roll| {
-            u32::try_from(index).is_ok_and(|index| crate::curse::set_forced(pos, roll, index, false))
+            u32::try_from(index)
+                .is_ok_and(|index| crate::curse::set_forced(pos, roll, index, false))
         })
     };
     say(
         host,
         if accepted {
-            format!("{pos:?}: curse draw {} (index {index}).", if clear { "cleared" } else { "armed" })
+            format!(
+                "{pos:?}: curse draw {} (index {index}).",
+                if clear { "cleared" } else { "armed" }
+            )
         } else {
-            format!("{pos:?}: roll must be -1 or 0..{}, index 0..{}.", BAD_ENCHANT_CHANCE, CURSES.len())
+            format!(
+                "{pos:?}: roll must be -1 or 0..{}, index 0..{}.",
+                BAD_ENCHANT_CHANCE,
+                CURSES.len()
+            )
         },
     );
 }

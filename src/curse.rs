@@ -41,7 +41,9 @@ pub(crate) fn set_forced(pos: [i32; 3], roll: u32, index: u32, clear: bool) -> b
     if !clear && (!curse_roll_domain(roll) || index as usize >= CURSES.len()) {
         return false;
     }
-    let mut armed = armed().lock().expect("the evilcraft curse lock is held for one write");
+    let mut armed = armed()
+        .lock()
+        .expect("the evilcraft curse lock is held for one write");
     if clear {
         armed.by_position.remove(&pos);
     } else {

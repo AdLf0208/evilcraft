@@ -1,0 +1,7 @@
+{
+  "recipe": {
+    "file": "data/evilcraft/recipe/crafting/undead_wood_stripped.json",
+    "expect": { "id": "evilcraft:undead_wood_stripped", "count": 3 },
+    "consume": "evilcraft:undead_log_stripped"
+  }
+}

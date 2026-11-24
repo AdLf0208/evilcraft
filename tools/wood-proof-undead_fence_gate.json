@@ -1,0 +1,7 @@
+{
+  "recipe": {
+    "file": "data/evilcraft/recipe/crafting/undead_fence_gate.json",
+    "expect": { "id": "evilcraft:undead_fence_gate", "count": 1 },
+    "consume": "evilcraft:undead_planks"
+  }
+}

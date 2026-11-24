@@ -1,0 +1,9 @@
+{
+  "recipe": {
+    "file": "data/evilcraft/recipe/crafting/undead_planks.json",
+    "expect": { "id": "evilcraft:undead_planks", "count": 4 },
+    "consume": "evilcraft:undead_log"
+    ,"items": { "0": "evilcraft:undead_log" }
+  }
+  ,"loot": { "block": "evilcraft:undead_log", "expect": "evilcraft:undead_log" }
+}

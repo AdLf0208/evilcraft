@@ -1,0 +1,15 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "P  ",
+    "PP ",
+    "PPP"
+  ],
+  "key": {
+    "P": "evilcraft:undead_planks"
+  },
+  "result": {
+    "id": "evilcraft:undead_planks_stairs",
+    "count": 4
+  }
+}

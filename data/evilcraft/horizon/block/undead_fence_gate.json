@@ -1,0 +1,9 @@
+{
+  "item": true,
+  "template": "minecraft:oak_fence_gate",
+  "properties": {
+    "hardness": 2.0,
+    "explosion_resistance": 3.0,
+    "sounds": "minecraft:oak_planks"
+  }
+}

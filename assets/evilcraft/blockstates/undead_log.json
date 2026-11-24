@@ -1,0 +1,7 @@
+{
+  "variants": {
+    "axis=x": { "model": "evilcraft:block/undead_log", "x": 90, "y": 90 },
+    "axis=y": { "model": "evilcraft:block/undead_log" },
+    "axis=z": { "model": "evilcraft:block/undead_log", "x": 90 }
+  }
+}
