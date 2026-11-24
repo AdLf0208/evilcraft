@@ -777,3 +777,74 @@ The in-game legs (default, control, `SELFTEST=wood`) plus five kept flake logs:
 
 `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=34 ok=34 missing-exit=0
 bad-exit=0` (exit 0): the 25 earlier legs stay green and the nine new logs are this slice's.
+
+## Slice 15 (0.2.15) — the two undead-tree Blood Infuser recipes
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job W1-evilcraft --port ports/evilcraft` were forwarded
+to **AdLf-PC** (`build-slot: forwarding … to the remote runner`); the launcher build and the e2e
+legs stayed local. `CARGO_INCREMENTAL=0`, no `--target-dir`, no `BUILD_LOCAL=1`, no raised slots.
+Full rule, red proof, transcript and coverage: `notes.md` § **Slice 15**; design in
+`tools/slice15-plan.md`; logs under `ports/_shared/evidence/evilcraft{,-e2e}/`.
+
+The jar's `base/undead_sapling.json` (260 B) and `base/reinforced_undead_planks.json` (288 B) are
+carried byte for byte: `dead_bush → undead_sapling@1` for **800 mB in 200 ticks at tier 0** (no
+`tier` field upstream) and `undead_planks → reinforced_undead_planks@1` for **1,000 mB in 250 ticks
+at tier 2** (the dispatch note's "tier 3" corrected from the artefact).
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (files not carried) | **FAILED 3/91** — `a dead bush is infused at tier 0`, `left: 10 / right: 12`, `undead planks are infused at tier 2` | `sdk-test-red-slice15.log` |
+| tests (green) | `cargo test` | **91 passed, 0 failed** (regenerated after the final build) | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 629 API uses, 23 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **269,193 B** `2a76e9eb…65adbc6`, **`CMP-IDENTICAL`**, 211 entries, no `Cargo.lock` | `sdk-build-a/b/cmp-0.2.15.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `CHECK_EXIT:0` | `sdk-check-fits-0.2.15.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `FIT_PIN_EXIT:0` | `sdk-check-fits-0.2.15.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `FIT_OTHER_EXIT:0` | `sdk-check-fits-0.2.15.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** — 91 tests, 0 warnings, runtime byte-identical, package matches the tree, R9 clean, check + fits, Skills gate PASS | `sdk-gate-0.2.15.log` |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 36 recipe/loot files; both new recipes `ok`; unchanged slice-1 `"rolls": 1.0` | `sdk-dialect-0.2.15.log` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-5b295a50ac7b`, `Compiling evilcraft (1 of 1)`; export `src/`, `data/`, `assets/`, manifest byte-identical to the port | `launcher-build-0.2.15.log`, `sdk-export-check-0.2.15.log` |
+
+`LICENSE-NOTICE.md` was edited before the final build (the twelve carried recipes are credited)
+and `tools/stamp_license.py` re-run, so the gate's "package matches the tree" is green. The
+`sdk-test.log` was regenerated as the last remote step: an intermediate log had been overwritten
+by the remote evidence pull with 0.2.14's 88-test run.
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`, `OLD14=1`) | **`PASS` + `EXIT:0`** — every earlier phase plus the 0.2.14 leg and AO | `e2e-launcher-0.2.15.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.15.log` |
+| selftest (this slice) | `SELFTEST=undeadinfuse` | **`FAIL` + `EXIT:1`** at AO — *SELFTEST flipped: the dead bush became evilcraft:undead_sapling, as it should* | `e2e-launcher-selftest-undeadinfuse-0.2.15.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=37 ok=37 missing-exit=0
+bad-exit=0` (exit 0): all 34 earlier legs stay green and the three 0.2.15 logs are this slice's.
+
+Transcript of the new phase (verbatim from `e2e-launcher-0.2.15.log`):
+
+```
+== the previous package (0.2.14): the infuser reads 10/10 recipes ==
+  Blood Infuser [206, 101, 0]: tank 0/10000 mB, tier 0, cont empty@0, in empty@0, out empty@0, progress 0, recipes 10/10 t=150
+  0.2.14: 10/10 recipe files (no undead_sapling or reinforced_undead_planks)
+== AO: the two undead-tree infusions (the loop 0.2.14 opened) ==
+  infuser reads 12/12 recipe files (the two undead-tree files included)
+  Blood Infuser [206, 101, 0]: tank 9200/10000 mB, tier 0, cont empty@0, in empty@0, out evilcraft:undead_sapling@1, progress 0, recipes 12/12 t=9374
+  tier 0: dead_bush -> undead_sapling@1 for 800 mB in 200 ticks, tank 9200
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 0, cont empty@0, in evilcraft:undead_planks@1, out empty@0, progress 0, recipes 12/12 t=9760
+  330 ticks at tier 0: the planks are untouched, no product, 10000 mB left
+  Blood Infuser [206, 101, 0]: tank 9000/10000 mB, tier 3, cont empty@0, in empty@0, out evilcraft:reinforced_undead_planks@1, progress 0, recipes 12/12 t=10129
+  tier 3: undead_planks -> reinforced_undead_planks@1 for 1,000 mB in 250 ticks, tank 9000
+```
+
+**Fail-capable four ways.** (1) `SELFTEST=undeadinfuse` inverts AO's first output equality and
+exits 1. (2) The tier-0 window is the differential on the same machine, tank and input: 330 ticks
+consume and spend nothing without a promise; the same input yields one plank for 1,000 mB at
+tier 3. (3) The 0.2.14 leg reads 10/10 on the same rig where H and AO read 12/12. (4) The
+whole-package control has no infuser to place.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 37/37 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).
+

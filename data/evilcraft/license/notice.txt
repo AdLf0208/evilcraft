@@ -36,14 +36,17 @@ MIT grant on record as the build metadata's alternative.
   - the textures listed in the grant paragraph above — every one the jar's image, unchanged;
     the chest's block texture is the jar's `colossal_blood_chest.png` under the name
     `blood_chest.png`, and the Blook's and the Purifier's three arrived with 0.2.9;
-  - **the ten Blood Infuser recipes** the package carries, byte for byte: the nine
+  - **the twelve Blood Infuser recipes** the package carries, byte for byte: the nine
     `convenience/` files — `minecraft_blaze_rod.json`, `minecraft_creeper_head.json`,
     `minecraft_grass_block.json`, `minecraft_nether_wart.json`, `minecraft_netherrack.json`,
     `minecraft_red_mushroom.json`, `minecraft_soul_sand.json`, `minecraft_spider_eye.json`,
-    `minecraft_zombie_head.json` — and `base/blook.json` (0.2.9). The **only** change is the
-    directory: upstream's `data/evilcraft/recipe/blood_infuser/convenience/<file>` is this
-    package's `data/evilcraft/recipe/blood_infuser/<file>` (the recipe's `type`,
-    `input_item`, `input_fluid`, `output_item`, `duration`, `xp` and `tier` are unedited);
+    `minecraft_zombie_head.json` — and `base/blook.json` (0.2.9), plus the two undead-tree
+    `base/` files `base/undead_sapling.json` and `base/reinforced_undead_planks.json` (0.2.15).
+    The **only** change for the nine convenience files is the directory: upstream's
+    `data/evilcraft/recipe/blood_infuser/convenience/<file>` is this package's
+    `data/evilcraft/recipe/blood_infuser/<file>`; the three `base/` files keep their upstream
+    path. No recipe's `type`, `input_item`, `input_fluid`, `output_item`, `duration`, `xp` or
+    `tier` is edited;
   - the Blood Stain's blockstate and its three block models, the Purifier's blockstate, the
     Dark Tank's item model, and the `minecraft:replaceable` block tag (`data/minecraft/tags/
     block/replaceable.json`), all byte for byte;

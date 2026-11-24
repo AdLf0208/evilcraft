@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook, slice 10: review fixes, slice 11: the Vengeance Pickaxe's immunity, slice 12: the tanks' comparator signal; three of the purifier's four actions stay blocked)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook, slice 10: review fixes, slice 11: the Vengeance Pickaxe's immunity, slice 12: the tanks' comparator signal, slice 13: the Blood Chest's curse roll, slice 14: the Undead Wood set, slice 15: the two undead-tree infusions; three of the purifier's four actions stay blocked)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -3161,8 +3161,200 @@ a vanilla crafting-table control beside it.
 | axe-strip (log/wood → stripped), fire spread, compostability | not ported | no content surface; deviation 3 |
 | `tree_undead` configured feature / sapling growth | not ported | worldgen inert at this pin; deviation 2 |
 | jar's conditional leaves/slab/fence loot functions | not ported (converted) | deviation 1; 26.3 dialect gate |
-| jar's `base/undead_sapling`, `base/reinforced_undead_planks`, `broom_part_rod_undead` recipes | not ported | add-on/infuser families outside this slice's crafting set |
+| jar's `base/undead_sapling`, `base/reinforced_undead_planks` recipes | **carried by slice 15** | AO: the readout goes 10/10 → 12/12 and both infusions run in game |
+| jar's `broom_part_rod_undead` recipe | not ported | an add-on-family recipe; the broom family is not carried |
 
 ### Skills
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 15 — the two undead-tree Blood Infuser recipes (0.2.15)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher
+0.2.92) + mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3.
+Package **0.2.15** on top of 0.2.14 (an Update of our own entry; the registry entry, the PR and
+the ledger stay the orchestrator's). The design and the alternative considered are in
+`tools/slice15-plan.md`.
+
+### The gap this slice closes, and why this family
+
+Slice 14's coverage row, verbatim:
+
+> | jar's `base/undead_sapling`, `base/reinforced_undead_planks`, `broom_part_rod_undead` recipes |
+>   not ported | add-on/infuser families outside this slice's crafting set |
+
+The two `base/` files are **Blood Infuser** recipes — the machine this port has carried since
+0.2.2 — and every id they name is carried now: `minecraft:dead_bush` (vanilla),
+`evilcraft:undead_planks` and `evilcraft:undead_sapling` (slice 14), and
+`evilcraft:reinforced_undead_planks` (slice 7). They close the loop 0.2.14 opened.
+`broom_part_rod_undead` stays a gap: the broom family is not carried, so carrying its recipe
+would be the dead data this port's `every_carried_recipe_names_items_this_package_or_the_game_has`
+test refuses.
+
+**Tier:** `deep` still governs the port; this slice is `logic`/`data` inside it — two data files,
+their `CARRIED` declarations and the item ids they name. No block, block entity, entity,
+renderer, hook or worldgen, and no parent mod outside the registry.
+
+### The numbers, read from the jar (not the brief)
+
+`ports/_shared/licence-cache/evilcraft-1.21.1-neoforge-1.2.100.jar`, both files carried byte for
+byte at `data/evilcraft/recipe/blood_infuser/base/<name>.json` (260 B and 288 B; `cmp` against the
+jar empty, exactly as `base/blook.json` was):
+
+| jar file | input | blood | output | count | duration | tier |
+|---|---|---:|---|---:|---:|---:|
+| `base/undead_sapling.json` | `minecraft:dead_bush` | **800 mB** | `evilcraft:undead_sapling` | 1 | **200 t** | **omitted → 0** |
+| `base/reinforced_undead_planks.json` | `evilcraft:undead_planks` | **1,000 mB** | `evilcraft:reinforced_undead_planks` | 1 | **250 t** | **2** |
+
+The dispatch prose named a "tier-3" recipe for the planks; the artefact says **tier 2**, which a
+tier-3 Promise also satisfies, so the port carries 2 and the in-game assertion proves both that
+tier 0 refuses it and that tier 3 runs it. The sapling file omits `tier`, which upstream's
+`RecipeSerializerBloodInfuser` reads as 0 — so the existing
+`every_carried_recipe_fits_its_tank_and_names_a_tier` range moved from `1..=3` to `0..=3`, and
+`CARRIED_ITEMS` gained the three undead ids so a carried file may name them.
+
+### TDD: the red proof, before the carry
+
+`sdk-test-red-slice15.log` (the three new tests written, the two files and their `CARRIED`
+entries not added yet):
+
+```
+test result: FAILED. 88 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_dead_bush_becomes_an_undead_sapling_at_tier_zero stdout ----
+thread 'runtime::tests::a_dead_bush_becomes_an_undead_sapling_at_tier_zero' (834747) panicked at src/runtime.rs:1620:14:
+a dead bush is infused at tier 0
+
+---- runtime::tests::the_infuser_carries_twelve_recipes stdout ----
+thread 'runtime::tests::the_infuser_carries_twelve_recipes' (834801) panicked at src/runtime.rs:1610:9:
+assertion `left == right` failed
+  left: 10
+ right: 12
+
+---- runtime::tests::undead_planks_become_reinforced_planks_at_tier_two stdout ----
+thread 'runtime::tests::undead_planks_become_reinforced_planks_at_tier_two' (834813) panicked at src/runtime.rs:1637:14:
+undead planks are infused at tier 2
+```
+
+Green: `sdk-test.log` — **91 passed, 0 failed** (88 + 3), regenerated after the final build;
+`sdk-clippy.log` — `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (build-slot leases; compile steps forwarded to AdLf-PC, game legs local)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (files not carried) | **FAILED 3/91** (`EXIT:101`) | `sdk-test-red-slice15.log` |
+| tests (green) | `cargo test` | **91 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 629 API uses, 23 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **269,193 B**, sha256 `2a76e9eb…65adbc6`, **`CMP-IDENTICAL`**, 211 entries, no `Cargo.lock` | `sdk-build-a/b/cmp-0.2.15.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `CHECK_EXIT:0` | `sdk-check-fits-0.2.15.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `FIT_PIN_EXIT:0` | `sdk-check-fits-0.2.15.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `FIT_OTHER_EXIT:0` | `sdk-check-fits-0.2.15.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** — 91 tests, 0 clippy warnings, runtime byte-identical, **package matches the tree**, R9 clean, check + fits, Skills gate PASS | `sdk-gate-0.2.15.log` |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 36 recipe/loot files; both new recipes `ok`; unchanged slice-1 `"rolls": 1.0` | `sdk-dialect-0.2.15.log` |
+| artifact record | `sdk-artifact-0.2.15.txt` | bytes/sha/entries/manifest/runtime sha, check and fits lines | `sdk-artifact-0.2.15.txt` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-5b295a50ac7b`, `Compiling evilcraft (1 of 1)`; export `src/`, `data/`, `assets/`, `horizon-mod.toml` byte-identical to the port | `launcher-build-0.2.15.log`, `sdk-export-check-0.2.15.log` |
+
+`LICENSE-NOTICE.md` was edited **before** the final build (the twelve recipes are credited) and
+`tools/stamp_license.py` re-run, so the gate's "package matches the tree" is green. No stale
+`native-*` tag with a 0.2.15 manifest existed before the build; the launcher produced exactly one.
+
+### The in-game leg (fail-capable)
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`, `OLD14=1`) | **`PASS` + `EXIT:0`** — every earlier phase plus the 0.2.14 leg and **AO** | `e2e-launcher-0.2.15.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.15.log` |
+| selftest (this slice) | `SELFTEST=undeadinfuse` | **`FAIL` + `EXIT:1`** at AO — *SELFTEST flipped: the dead bush became evilcraft:undead_sapling, as it should* | `e2e-launcher-selftest-undeadinfuse-0.2.15.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=37 ok=37
+missing-exit=0 bad-exit=0` (exit 0): all 34 earlier legs stay green and the three 0.2.15 logs
+are this slice's. No flake occurred on this run.
+
+Transcript of the new legs (verbatim from `e2e-launcher-0.2.15.log`):
+
+```
+== the previous package (0.2.14): the infuser reads 10/10 recipes ==
+  Blood Infuser [206, 101, 0]: tank 0/10000 mB, tier 0, cont empty@0, in empty@0, out empty@0, progress 0, recipes 10/10 t=150
+  0.2.14: 10/10 recipe files (no undead_sapling or reinforced_undead_planks)
+== H: the Blood Infuser's own recipe files load, and an unknown id is refused ==
+  Blood Infuser [206, 101, 0]: tank 0/10000 mB, tier 0, cont empty@0, in empty@0, out empty@0, progress 0, recipes 12/12 t=1284
+  block evilcraft:blood_infuser, 12/12 recipe files in force
+== AO: the two undead-tree infusions (the loop 0.2.14 opened) ==
+  infuser reads 12/12 recipe files (the two undead-tree files included)
+  Blood Infuser [206, 101, 0]: tank 9500/10000 mB, tier 0, cont empty@0, in empty@0, out empty@0, progress 0, recipes 12/12 t=9073
+  Blood Infuser [206, 101, 0]: tank 9200/10000 mB, tier 0, cont empty@0, in empty@0, out evilcraft:undead_sapling@1, progress 0, recipes 12/12 t=9374
+  tier 0: dead_bush -> undead_sapling@1 for 800 mB in 200 ticks, tank 9200
+  took 1 x evilcraft:undead_sapling out of the result slot into inventory slot 12
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 0, cont empty@0, in evilcraft:undead_planks@1, out empty@0, progress 0, recipes 12/12 t=9760
+  330 ticks at tier 0: the planks are untouched, no product, 10000 mB left
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 3, cont empty@0, in evilcraft:undead_planks@1, out empty@0, progress 23, recipes 12/12 t=9790
+  Blood Infuser [206, 101, 0]: tank 9000/10000 mB, tier 3, cont empty@0, in empty@0, out evilcraft:reinforced_undead_planks@1, progress 0, recipes 12/12 t=10129
+  tier 3: undead_planks -> reinforced_undead_planks@1 for 1,000 mB in 250 ticks, tank 9000
+  took 1 x evilcraft:reinforced_undead_planks out of the result slot into inventory slot 13
+```
+
+**Fail-capable four ways.** (1) `SELFTEST=undeadinfuse` inverts AO's first output equality and
+exits 1. (2) The tier-0 window is the differential on the same machine, the same full tank and
+the same undead-planks input: 330 ticks with no promise consume nothing and spend nothing; the
+same input with a tier-3 Promise yields one plank for 1,000 mB. (3) The 0.2.14 leg is the
+readout's differential on the same rig: 10/10 before the carry, 12/12 after. (4) The whole-package
+control has no infuser, so AO cannot even place one. The sapling's tier-0 run is its own
+counterfactual against the tier-2 recipe (the same machine ran both).
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `base/undead_sapling` (`dead_bush` → sapling, 800 mB, 200 t, tier 0) | **tested** | AO: `out evilcraft:undead_sapling@1`, tank 10,000 → 9,200, input consumed, at tier 0; unit `a_dead_bush_becomes_an_undead_sapling_at_tier_zero` |
+| `base/reinforced_undead_planks` (`undead_planks` → reinforced, 1,000 mB, 250 t, tier 2) | **tested** | AO: 330 t at tier 0 do nothing, then one block for 1,000 mB at tier 3; unit `undead_planks_become_reinforced_planks_at_tier_two` |
+| `recipes 10/10 → 12/12` | **tested** | the 0.2.14 leg reads `10/10`, H and AO read `12/12`; unit `the_infuser_carries_twelve_recipes` |
+| tier 0 is a legal carried tier | **tested** | `every_carried_recipe_fits_its_tank_and_names_a_tier` now pins `0..=3`; AO runs the tier-0 file in game |
+| `broom_part_rod_undead` and the broom family | not ported | no broom family is carried; it would be dead data |
+
+### Deviations this slice adds
+
+1. **The two files are carried byte for byte**, including the jar's 1.21.1 object ingredient
+   shapes; `decode_infusion` already reads them, and `check_261_dialect.py` accepts them as this
+   mod's own recipe type. No ingredient flattening was needed (unlike the wood recipes).
+2. **The tier range widened to 0..=3**, not a relaxation: the sapling file genuinely omits
+   `tier`, so upstream reads 0, and a tier-0 machine must run it. The reinforced file declares 2,
+   which a tier-3 Promise satisfies; the port does not police which promise slot holds it.
+
+### Upstream defects fixed
+
+None new. The dispatch note's "tier-3" for `reinforced_undead_planks` was corrected from the
+artefact (tier 2); this is a correction to the brief, not a change to the mod.
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+### Changelog for the record (0.2.15, verbatim)
+
+> 0.2.15 — the two undead-tree Blood Infuser recipes from the 1.2.100 jar are carried byte for
+> byte: a dead bush becomes one Undead Sapling for 800 mB in 200 ticks with no promise (the file
+> omits `tier`), and Undead Planks become one Reinforced Undead Plank for 1,000 mB in 250 ticks
+> at tier 2. The infuser now reads 12/12 recipe files where 0.2.14 read 10/10. 91 tests, two
+> identical builds, the in-game leg green with a new fail-capable phase AO, a 0.2.14 readout
+> differential, a package-less control and a `SELFTEST=undeadinfuse` that ends `EXIT:1`.
+
+## Next slice
+
+**Family:** the jar's `broom_part_rod_undead` and the rest of the promises/bowls progression —
+specifically `evilcraft:bowl_of_promises_*` and the three `promise_acceptor_*` blocks, the next
+named row in the coverage table that still fits `data`/`logic` inside `deep`. **Gap line:** slice
+2's coverage row, "`promise/bowl family (`bowl_of_promises_*`, `promise_acceptor_*`, speed/efficiency
+promises) | not ported | the promise items are carried as machine upgrades only; their crafting
+chain is a later slice`", and slice 1's gap 7 ("...promises/bowls... the rest of the jar").
+**Why it fits:** the three tier promises are already carried as infuser upgrades, so this is the
+progression that makes them craftable rather than a new machine or entity; the infuser can run
+the chain's own `base/` recipes as data. **In-game assertion:** after carrying the jar's bowl and
+acceptor recipes, build one acceptor in the arena, insert the artefact's declared input through
+`/evilcraft load`, and read the parsed `/evilcraft infuser` and acceptor readout: the bowl recipe
+must be `recipes 14/14` (or its carried count) and yield one bowl for the jar's fluid amount and
+ticks at the declared tier, while the same input at tier 0 produces nothing — with a
+`SELFTEST=promises` inversion ending `EXIT:1`. Stop and report `blocked(<symbol>)` first if the
+jar's acceptor behaviour is a Java class with no data table and no placeable surface at this pin.
+

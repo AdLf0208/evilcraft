@@ -204,8 +204,9 @@ pub const BLOOK: &str = "evilcraft:blook";
 /// `ItemVengeancePickaxe`: the tool the Purifier's curse action refuses to touch.
 pub const VENGEANCE_PICKAXE: &str = "evilcraft:vengeance_pickaxe";
 /// Every item id this package registers besides vanilla's: the extractor, the blook, the
-/// Vengeance Pickaxe and the three tier promises (`data/evilcraft/horizon/item/`). A carried
-/// recipe may name these or `minecraft:`; nothing else is an item the game or the package has.
+/// Vengeance Pickaxe, the three tier promises (`data/evilcraft/horizon/item/`) and the three
+/// undead-wood ids the two `base/` infusions name (slices 7 and 14). A carried recipe may name
+/// these or `minecraft:`; nothing else is an item the game or the package has.
 pub const CARRIED_ITEMS: &[&str] = &[
     EXTRACTOR,
     BLOOK,
@@ -213,6 +214,9 @@ pub const CARRIED_ITEMS: &[&str] = &[
     "evilcraft:promise_tier_1",
     "evilcraft:promise_tier_2",
     "evilcraft:promise_tier_3",
+    "evilcraft:undead_sapling",
+    "evilcraft:undead_planks",
+    "evilcraft:reinforced_undead_planks",
 ];
 /// Upstream `BlockEntityBloodStain.CAPACITY`: five buckets of blood.
 pub const STAIN_TANK: i32 = 5 * BUCKET;
@@ -1472,8 +1476,10 @@ mod tests {
                 recipe.blood
             );
             assert!(recipe.ticks > 0, "{} takes no time", recipe.id);
+            // Tier 0 is legal: the jar's `base/undead_sapling.json` omits `tier`, which
+            // `RecipeSerializerBloodInfuser` reads as 0, so a machine with no promise runs it.
             assert!(
-                (1..=3).contains(&recipe.tier),
+                (0..=3).contains(&recipe.tier),
                 "{} names tier {}",
                 recipe.id,
                 recipe.tier
@@ -1591,6 +1597,44 @@ mod tests {
         assert_eq!((blook.blood, blook.ticks, blook.tier), (500, 500, 1));
         // And a tier-1 machine is the least that runs it, as the file's tier says.
         assert_eq!(infusion_for(&recipes, "minecraft:book", 0), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 15: the two undead-tree `base/` infusions
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn the_infuser_carries_twelve_recipes() {
+        // The nine `convenience/` files, `base/blook`, and the two undead-tree `base/` files
+        // (0.2.15). `recipes_of_type` must hand the game all twelve, not just the decoded ones.
+        assert_eq!(crate::infuser::CARRIED.len(), 12);
+        assert_eq!(carried().len(), 12);
+    }
+
+    #[test]
+    fn a_dead_bush_becomes_an_undead_sapling_at_tier_zero() {
+        // `data/evilcraft/recipe/blood_infuser/base/undead_sapling.json`, the jar's own file:
+        // 800 mB over 200 ticks, and *no* `tier` field — upstream reads that as tier 0.
+        let recipes = carried();
+        let sapling = infusion_for(&recipes, "minecraft:dead_bush", 0)
+            .expect("a dead bush is infused at tier 0");
+        assert_eq!(sapling.output, "evilcraft:undead_sapling");
+        assert_eq!(sapling.output_count, 1);
+        assert_eq!((sapling.blood, sapling.ticks, sapling.tier), (800, 200, 0));
+    }
+
+    #[test]
+    fn undead_planks_become_reinforced_planks_at_tier_two() {
+        // `data/evilcraft/recipe/blood_infuser/base/reinforced_undead_planks.json`: 1,000 mB
+        // over 250 ticks at tier 2, so a machine with no promise must refuse it.
+        let recipes = carried();
+        assert_eq!(infusion_for(&recipes, "evilcraft:undead_planks", 0), None);
+        assert_eq!(infusion_for(&recipes, "evilcraft:undead_planks", 1), None);
+        let planks = infusion_for(&recipes, "evilcraft:undead_planks", 2)
+            .expect("undead planks are infused at tier 2");
+        assert_eq!(planks.output, "evilcraft:reinforced_undead_planks");
+        assert_eq!(planks.output_count, 1);
+        assert_eq!((planks.blood, planks.ticks, planks.tier), (1_000, 250, 2));
     }
 
     #[test]

@@ -26,7 +26,7 @@
 #     the extractor reads 0.
 #
 # Slice 2 — the Blood Infuser, per the parity rule:
-#  H  the machine places, reads 0 mB at tier 0, and reads all 9 of its own recipe files
+#  H  the machine places, reads 0 mB at tier 0, and reads all 12 of its own recipe files
 #     (the counterfactual for the recipe type: a package that did not register it reads
 #     0); an unknown item id is refused by the harness loader;
 #  I  a tier-3 recipe waits on a tier-0 machine: 560 ticks, the bone untouched, no
@@ -156,6 +156,14 @@
 #     note's 9 is an arithmetic slip) and 9 at 1,800/3,000; re-reads happen without nudging (the
 #     port's OutputSignal notification). A comparator facing `minecraft:stone` reads 0.
 #
+# Slice 15 (0.2.15) — the two undead-tree Blood Infuser recipes:
+#  AO the readout is `recipes 12/12` (the 0.2.14 leg reads 10/10 on the same rig); `minecraft:dead_bush`
+#     at tier 0 becomes one `evilcraft:undead_sapling` for 800 mB in 200 ticks, and
+#     `evilcraft:undead_planks` stays untouched for 330 ticks at tier 0 but becomes one
+#     `evilcraft:reinforced_undead_planks` for 1,000 mB in 250 ticks once a tier-3 Promise
+#     is inserted. The tier-0 window is the differential, `SELFTEST=undeadinfuse` inverts the
+#     first output equality, and the package-less control has no infuser to place.
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
@@ -180,8 +188,8 @@
 # SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=vengeance flips AJ's immunity,
 # SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split,
 # SELFTEST=comparator flips AK's 2,000 mB reading, SELFTEST=curse flips AL's roll-0
-# assertion and SELFTEST=wood flips AM's block-name equality (each must FAIL),
-# proving the scenarios can fail.
+# assertion, SELFTEST=wood flips AM's block-name equality and SELFTEST=undeadinfuse flips
+# AO's dead-bush output equality (each must FAIL), proving the scenarios can fail.
 # Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
@@ -211,12 +219,18 @@ OLD_GAME=${OLD_GAME:-${GAME:+$(dirname "$GAME")/../evilcraft-0.2.3/horizon-clien
 # export (`cp -al evilcraft evilcraft-0.2.9` before a rebuild), like the 0.2.3 one.
 LEGACY_GAME=${LEGACY_GAME:-${GAME:+$(dirname "$GAME")/../evilcraft-0.2.9/horizon-client}}
 LEGACY=${LEGACY:-$([ "${CONTROL:-0}" = 1 ] && echo 0 || echo 1)}
+# The previous package (0.2.14): its infuser reads 10/10 recipe files, the "from" side of
+# phase AO's 12/12. Kept beside the current export (`cp -al evilcraft evilcraft-0.2.14`
+# before the launcher rebuild), like the 0.2.3 and 0.2.9 ones.
+OLD14_GAME=${OLD14_GAME:-${GAME:+$(dirname "$GAME")/../evilcraft-0.2.14/horizon-client}}
+OLD14_WORLD=EvilCraftOld14
 RES=${RES:-${HORIZON_RES:-/home/adlf/Desktop/horizon/.local/horizon-client/26.3}}
 SOCK=${SOCK:-/tmp/opencode/evilcraft-e2e.sock}
 SELFTEST=${SELFTEST:-0}
 # The previous package's leg runs with the default scenario only (it is a second launch and
 # the control/selftest logs are about their own phases).
 OLD=${OLD:-$([ "$SELFTEST" = 0 ] && [ "${CONTROL:-0}" = 0 ] && echo 1 || echo 0)}
+OLD14=${OLD14:-$([ "$SELFTEST" = 0 ] && [ "${CONTROL:-0}" = 0 ] && echo 1 || echo 0)}
 KEEP=${KEEP:-0}
 WORLD=EvilCraftE2E
 OLD_WORLD=EvilCraftOld
@@ -974,6 +988,24 @@ legacy_leg() {
     sleep 1
 }
 
+# The previous package (0.2.14): the same infuser on the same Nightly reads 10 of its 10
+# recipe files, so phase AO's 12/12 is measured against a package that lacks the two
+# undead-tree infusions. This is the readout's differential, not a parse of the log.
+old14_leg() {
+    echo "== the previous package (0.2.14): the infuser reads 10/10 recipes =="
+    [ -x "$OLD14_GAME" ] || fail "OLD14_GAME is not a game: '$OLD14_GAME'"
+    launch "$OLD14_WORLD" "$OLD14_GAME"
+    arena
+    place_chest "$IX" 101 0 "$INFUSER"
+    infuser "$IX" 101 0
+    [ "$CARRIED" = 10 ] || fail "0.2.14 claims $CARRIED recipes, expected 10"
+    [ "$RECIPES" = "$CARRIED" ] \
+        || fail "0.2.14 reads $RECIPES of its $CARRIED recipe files"
+    echo "  0.2.14: $RECIPES/$CARRIED recipe files (no undead_sapling or reinforced_undead_planks)"
+    ctl quit >/dev/null 2>&1 || true
+    sleep 1
+}
+
 echo "== launch (The End arena, content + native bundle) =="
 if [ "$CONTROL" = 1 ]; then
     # The control: the whole scenario on the same Nightly **without** the package, where
@@ -986,6 +1018,9 @@ if [ "$OLD" = 1 ]; then
 fi
 if [ "$LEGACY" = 1 ]; then
     legacy_leg
+fi
+if [ "$OLD14" = 1 ]; then
+    old14_leg
 fi
 launch
 arena
@@ -1271,9 +1306,10 @@ place_chest "$IX" 101 0 "$INFUSER"
 infuser "$IX" 101 0
 [ "$TANK" = 0 ] || fail "a fresh infuser holds $TANK mB, expected 0"
 [ "$TIER" = 0 ] || fail "a fresh infuser is tier $TIER, expected 0"
-# The jar's nine `convenience/` infusions plus `base/blook` (10 as of slice 9), and the
-# machine reads every one of them (`recipes_of_type`).
-[ "$CARRIED" = 10 ] || fail "the package claims $CARRIED carried recipes, expected 10"
+# The jar's nine `convenience/` infusions plus `base/blook`, `base/undead_sapling` and
+# `base/reinforced_undead_planks` (12 as of slice 15), and the machine reads every one of
+# them (`recipes_of_type`). The 0.2.14 leg at the start of the default run reads 10/10.
+[ "$CARRIED" = 12 ] || fail "the package claims $CARRIED carried recipes, expected 12"
 [ "$RECIPES" = "$CARRIED" ] || fail "the infuser reads $RECIPES of its $CARRIED recipe files, so the recipe type did not load"
 [ "$OUT_ITEM" = "empty" ] || fail "a fresh infuser holds $OUT_ITEM in its result slot"
 echo "  block $(block_name "$IX" 101 0), $RECIPES/$CARRIED recipe files in force"
@@ -1338,6 +1374,66 @@ infuse minecraft:zombie_head minecraft:creeper_head 1 5000 1000
 # Book and 500 mB for a Blook in 500 ticks at tier 1). It is also the recipe whose keys this
 # package has to resolve: its product is an item the package itself registers.
 infuse minecraft:book evilcraft:blook 1 500 500
+
+echo "== AO: the two undead-tree infusions (the loop 0.2.14 opened) =="
+# The readout is the proof that all twelve files are in force, not just that they decode.
+infuser "$IX" 101 0
+[ "$CARRIED" = 12 ] || fail "the package claims $CARRIED carried recipes, expected 12"
+[ "$RECIPES" = "$CARRIED" ] \
+    || fail "the infuser reads $RECIPES of its $CARRIED recipe files, so the recipe type did not load"
+echo "  infuser reads $RECIPES/$CARRIED recipe files (the two undead-tree files included)"
+
+# `base/undead_sapling.json` has no `tier`, so upstream reads it as 0. Clear the promise
+# phase J left in the first upgrade slot (internal slot 3, menu slot 303).
+load_slot "$IX" 101 0 3 empty
+ctl wait 12 >/dev/null
+infuser "$IX" 101 0
+[ "$TIER" = 0 ] || fail "clearing the promise left the machine at tier $TIER, expected 0"
+load_slot "$IX" 101 0 1 minecraft:dead_bush
+say "evilcraft blood $IX 101 0 $TANK_CAPACITY"
+ctl wait 280 >/dev/null
+infuser "$IX" 101 0
+SAPLING_WANT=evilcraft:undead_sapling
+[ "$OUT_ITEM" = "$SAPLING_WANT" ] \
+    || fail "a dead bush became $OUT_ITEM at tier 0, expected $SAPLING_WANT"
+if [ "$SELFTEST" = undeadinfuse ]; then
+    echo "  SELFTEST: asserting the dead bush was not infused (this must fail)"
+    [ "$OUT_ITEM" != "$SAPLING_WANT" ] \
+        || fail "SELFTEST flipped: the dead bush became $SAPLING_WANT, as it should"
+fi
+[ "$OUT_COUNT" = 1 ] || fail "the infusion made $OUT_COUNT saplings, expected 1"
+[ "$IN_ITEM" = empty ] || fail "the dead bush survived the infusion ($IN_ITEM@$IN_COUNT)"
+[ "$TANK" = $((TANK_CAPACITY - 800)) ] \
+    || fail "the sapling left $TANK mB, expected $((TANK_CAPACITY - 800)) (800 mB spent)"
+echo "  tier 0: dead_bush -> undead_sapling@1 for 800 mB in 200 ticks, tank $TANK"
+take_output evilcraft:undead_sapling 1
+
+# `base/reinforced_undead_planks.json` declares tier 2: the same machine at tier 0 must
+# refuse it (the tier gate's differential), then do it once a tier-3 promise is in.
+load_slot "$IX" 101 0 1 evilcraft:undead_planks
+say "evilcraft blood $IX 101 0 $TANK_CAPACITY"
+ctl wait 330 >/dev/null
+infuser "$IX" 101 0
+[ "$TIER" = 0 ] || fail "the machine is tier $TIER before the promise"
+[ "$IN_ITEM" = evilcraft:undead_planks ] || fail "tier 0 consumed the planks ($IN_ITEM@$IN_COUNT)"
+[ "$OUT_ITEM" = empty ] || fail "tier 0 made $OUT_ITEM from undead planks"
+[ "$TANK" = "$TANK_CAPACITY" ] || fail "tier 0 spent $((TANK_CAPACITY - TANK)) mB"
+echo "  330 ticks at tier 0: the planks are untouched, no product, $TANK mB left"
+
+load_slot "$IX" 101 0 3 "$PROMISE"
+ctl wait 12 >/dev/null
+infuser "$IX" 101 0
+[ "$TIER" = 3 ] || fail "the tier-3 promise left the machine at tier $TIER"
+ctl wait 330 >/dev/null
+infuser "$IX" 101 0
+[ "$OUT_ITEM" = evilcraft:reinforced_undead_planks ] \
+    || fail "the planks became $OUT_ITEM at tier 3, expected evilcraft:reinforced_undead_planks"
+[ "$OUT_COUNT" = 1 ] || fail "the infusion made $OUT_COUNT reinforced planks, expected 1"
+[ "$IN_ITEM" = empty ] || fail "the undead planks survived the infusion ($IN_ITEM@$IN_COUNT)"
+[ "$TANK" = $((TANK_CAPACITY - 1000)) ] \
+    || fail "the infusion left $TANK mB, expected $((TANK_CAPACITY - 1000)) (1,000 mB spent)"
+echo "  tier 3: undead_planks -> reinforced_undead_planks@1 for 1,000 mB in 250 ticks, tank $TANK"
+take_output evilcraft:reinforced_undead_planks 1
 
 echo "== M: the container slot empties a filled extractor into the tank =="
 say "evilcraft blood $IX 101 0 0"
@@ -2693,4 +2789,4 @@ for proof in undead_planks undead_wood undead_wood_stripped undead_planks_stairs
 done
 echo "  all seven jar recipes: declared output, count, consumed ingredients and a dropped log"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0, and the Blood Chest's non-bulk repair adds minecraft:vanishing_curse@1 at forced roll 0 while the same tool, chest, tank and ticks at roll 9,999 stay clean and both repair and spend blood, an undead log given once reads back as exactly one in the parsed inventory, placed on a floor's up face reads evilcraft:undead_log with axis y and against an east face reads axis x while evilcraft:no_such_wood is refused, and all seven jar recipes (planks x4 from the undead-logs tag, wood x3 from four logs, stripped wood x3 from four stripped logs, stairs x4 from six planks, slab x6 from three planks, fence x3 and gate x1 from planks and sticks) craft their declared output and count with the ingredients consumed and an undead log drops itself when broken"
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 12 of its carried recipe files (the Blook's and the two undead-tree ones included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0, and the Blood Chest's non-bulk repair adds minecraft:vanishing_curse@1 at forced roll 0 while the same tool, chest, tank and ticks at roll 9,999 stay clean and both repair and spend blood, an undead log given once reads back as exactly one in the parsed inventory, placed on a floor's up face reads evilcraft:undead_log with axis y and against an east face reads axis x while evilcraft:no_such_wood is refused, and all seven jar recipes (planks x4 from the undead-logs tag, wood x3 from four logs, stripped wood x3 from four stripped logs, stairs x4 from six planks, slab x6 from three planks, fence x3 and gate x1 from planks and sticks) craft their declared output and count with the ingredients consumed and an undead log drops itself when broken, and the two undead-tree infusions turn a dead bush into one Undead Sapling for 800 mB in 200 ticks with no promise while Undead Planks stay untouched at tier 0 and make one Reinforced Undead Plank for 1,000 mB in 250 ticks once a tier-3 Promise is inserted"

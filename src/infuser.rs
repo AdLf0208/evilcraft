@@ -39,14 +39,23 @@ const PROGRESS: &str = "progress";
 /// `evilcraft:blood_infuser/<name>`), with the file's own bytes.
 ///
 /// They are the jar's `data/evilcraft/recipe/blood_infuser/convenience/` files whose
-/// ingredient and product are both items this package or the game has; the rest of the
+/// ingredient and product are both items this package or the game has, plus the jar's
+/// `base/blook.json` and (since 0.2.15) the two undead-tree `base/` files; the rest of the
 /// jar's 40 need items this slice does not carry (see the gap list in `notes.md`).
 pub const CARRIED: &[(&str, &str)] = &[
-    // `base/blook.json` is the jar's own path (the `base/` recipes are the machine's
-    // additions; the nine below are `convenience/` float, flattened when they were carried).
+    // The `base/` recipes keep the jar's own path; the nine `convenience/` files below were
+    // flattened into `recipe/blood_infuser/` when they were carried.
     (
         "evilcraft:blood_infuser/base/blook",
         include_str!("../data/evilcraft/recipe/blood_infuser/base/blook.json"),
+    ),
+    (
+        "evilcraft:blood_infuser/base/undead_sapling",
+        include_str!("../data/evilcraft/recipe/blood_infuser/base/undead_sapling.json"),
+    ),
+    (
+        "evilcraft:blood_infuser/base/reinforced_undead_planks",
+        include_str!("../data/evilcraft/recipe/blood_infuser/base/reinforced_undead_planks.json"),
     ),
     (
         "evilcraft:blood_infuser/minecraft_blaze_rod",
