@@ -40,8 +40,9 @@ const PROGRESS: &str = "progress";
 ///
 /// They are the jar's `data/evilcraft/recipe/blood_infuser/convenience/` files whose
 /// ingredient and product are both items this package or the game has, plus the jar's
-/// `base/blook.json` and (since 0.2.15) the two undead-tree `base/` files; the rest of the
-/// jar's 40 need items this slice does not carry (see the gap list in `notes.md`).
+/// `base/blook.json`, the two undead-tree `base/` files (0.2.15) and (since 0.2.16) the
+/// `convenience/minecraft_fermented_spider_eye.json` infusion; the rest of the jar's 40
+/// need items this slice does not carry (see the gap list in `notes.md`).
 pub const CARRIED: &[(&str, &str)] = &[
     // The `base/` recipes keep the jar's own path; the nine `convenience/` files below were
     // flattened into `recipe/blood_infuser/` when they were carried.
@@ -64,6 +65,10 @@ pub const CARRIED: &[(&str, &str)] = &[
     (
         "evilcraft:blood_infuser/minecraft_creeper_head",
         include_str!("../data/evilcraft/recipe/blood_infuser/minecraft_creeper_head.json"),
+    ),
+    (
+        "evilcraft:blood_infuser/minecraft_fermented_spider_eye",
+        include_str!("../data/evilcraft/recipe/blood_infuser/minecraft_fermented_spider_eye.json"),
     ),
     (
         "evilcraft:blood_infuser/minecraft_grass_block",

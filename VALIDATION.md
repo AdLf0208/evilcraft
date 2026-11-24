@@ -848,3 +848,57 @@ whole-package control has no infuser to place.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).
 
+## Slice 16 (0.2.16) — the fermented-spider-eye Blood Infuser recipe
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job W1-evilcraft --port ports/evilcraft` forwarded to
+**AdLf-PC**; the launcher build and the e2e legs stayed local. `CARGO_INCREMENTAL=0`, no
+`--target-dir`, no `BUILD_LOCAL=1`, no raised slots. Full record and candidate audit: `notes.md`
+§ **Slice 16**; design in `tools/slice16-plan.md`.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (file not carried) | **FAILED 2/92** — *a spider eye is infused at tier 2*, `left: 12 / right: 13` | `sdk-test-red-slice16.log` |
+| tests (green) | `cargo test` | **92 passed, 0 failed** (regenerated after the final build) | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 629 API uses, 23 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **269,898 B** `d3dd3c59aaa0b83407052f7f7a6416cb0799bc566f77c7243690599151180546`, **`CMP-IDENTICAL`**, 212 entries, no `Cargo.lock` | `sdk-build-a/b/cmp-0.2.16.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `CHECK_EXIT:0` | `sdk-check-fits-0.2.16.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `FIT_PIN_EXIT:0` | `sdk-check-fits-0.2.16.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `FIT_OTHER_EXIT:0` | `sdk-check-fits-0.2.16.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** — 92 tests, 0 warnings, runtime byte-identical, package matches the tree, R9 clean, check + fits, Skills gate PASS | job report |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 37 recipe/loot files; the new recipe `ok`; unchanged slice-1 `"rolls": 1.0` | job report |
+| artifact record | `sdk-artifact-0.2.16.txt` | bytes/sha/entries/manifest, check and fits lines | `sdk-artifact-0.2.16.txt` |
+
+Launcher build: `native-0a875da-ded928b49a05`, log line `Compiling evilcraft (1 of 1)`; the export's
+`src/`, `data/`, `assets/` and `horizon-mod.toml` are byte-identical to the port (`version =
+"0.2.16"`).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`, `OLD14=1`, `OLD15=1`) | **`PASS` + `EXIT:0`** — every earlier phase plus the 0.2.14 (10/10), 0.2.15 (12/12) readouts and AP | `e2e-launcher-0.2.16.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.16.log` |
+| selftest (this slice) | `SELFTEST=fermented` | **`FAIL` + `EXIT:1`** at AP — *SELFTEST flipped: the spider eye became minecraft:fermented_spider_eye, as it should* | `e2e-launcher-selftest-fermented-0.2.16.log` |
+| flakes (kept) | default attempts 1 and 2 | `EXIT:1` at AM's face placement and N's survival break | `e2e-launcher-0.2.16-attempt{1,2}.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=42 ok=42 missing-exit=0
+bad-exit=0` (exit 0): the 37 earlier legs stay green and the three 0.2.16 verdict legs plus two kept
+flakes end in `EXIT:<n>`.
+
+What the new phase measured (verbatim from `e2e-launcher-0.2.16.log`):
+
+```
+== AP: a spider eye is infused for 1,500 mB over 500 ticks at tier 2 ==
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 0, cont empty@0, in minecraft:spider_eye@1, out empty@0, progress 0, recipes 13/13 t=10443
+  560 ticks at tier 0: the spider eye is untouched, no product, 10000 mB left
+  Blood Infuser [206, 101, 0]: tank 8500/10000 mB, tier 2, cont empty@0, in empty@0, out minecraft:fermented_spider_eye@1, progress 0, recipes 13/13 t=11043
+  tier 2: spider_eye -> fermented_spider_eye@1 for 1,500 mB in 500 ticks, tank 8500
+  took 1 x minecraft:fermented_spider_eye out of the result slot into inventory slot 13
+```
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 42/42 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).
+

@@ -1604,11 +1604,30 @@ mod tests {
     // -----------------------------------------------------------------------
 
     #[test]
-    fn the_infuser_carries_twelve_recipes() {
-        // The nine `convenience/` files, `base/blook`, and the two undead-tree `base/` files
-        // (0.2.15). `recipes_of_type` must hand the game all twelve, not just the decoded ones.
-        assert_eq!(crate::infuser::CARRIED.len(), 12);
-        assert_eq!(carried().len(), 12);
+    fn the_infuser_carries_thirteen_recipes() {
+        // The ten `convenience/` files, `base/blook`, and the two undead-tree `base/` files
+        // (0.2.16). `recipes_of_type` must hand the game all thirteen, not just the decoded ones.
+        assert_eq!(crate::infuser::CARRIED.len(), 13);
+        assert_eq!(carried().len(), 13);
+    }
+
+    // -----------------------------------------------------------------------
+    // Slice 16: the fermented-spider-eye `convenience/` infusion
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_spider_eye_becomes_a_fermented_spider_eye_at_tier_two() {
+        // `convenience/minecraft_fermented_spider_eye.json`, the jar's own file: a spider eye
+        // becomes one fermented spider eye for 1,500 mB in 500 ticks at tier 2. Both ids are
+        // vanilla, so this is the cheapest remaining file that passes the carried-id gate.
+        let recipes = carried();
+        assert_eq!(infusion_for(&recipes, "minecraft:spider_eye", 0), None);
+        assert_eq!(infusion_for(&recipes, "minecraft:spider_eye", 1), None);
+        let eye = infusion_for(&recipes, "minecraft:spider_eye", 2)
+            .expect("a spider eye is infused at tier 2");
+        assert_eq!(eye.output, "minecraft:fermented_spider_eye");
+        assert_eq!(eye.output_count, 1);
+        assert_eq!((eye.blood, eye.ticks, eye.tier), (1_500, 500, 2));
     }
 
     #[test]

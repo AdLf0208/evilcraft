@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook, slice 10: review fixes, slice 11: the Vengeance Pickaxe's immunity, slice 12: the tanks' comparator signal, slice 13: the Blood Chest's curse roll, slice 14: the Undead Wood set, slice 15: the two undead-tree infusions; three of the purifier's four actions stay blocked)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook, slice 10: review fixes, slice 11: the Vengeance Pickaxe's immunity, slice 12: the tanks' comparator signal, slice 13: the Blood Chest's curse roll, slice 14: the Undead Wood set, slice 15: the two undead-tree infusions, slice 16: the fermented-spider-eye infusion; three of the purifier's four actions stay blocked)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -3340,7 +3340,7 @@ Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-de
 > identical builds, the in-game leg green with a new fail-capable phase AO, a 0.2.14 readout
 > differential, a package-less control and a `SELFTEST=undeadinfuse` that ends `EXIT:1`.
 
-## Next slice
+## Next slice (the 2026-11-24 dispatch note — resolved by the gate section below)
 
 **Family:** the jar's `broom_part_rod_undead` and the rest of the promises/bowls progression —
 specifically `evilcraft:bowl_of_promises_*` and the three `promise_acceptor_*` blocks, the next
@@ -3357,4 +3357,269 @@ must be `recipes 14/14` (or its carried count) and yield one bowl for the jar's 
 ticks at the declared tier, while the same input at tier 0 produces nothing — with a
 `SELFTEST=promises` inversion ending `EXIT:1`. Stop and report `blocked(<symbol>)` first if the
 jar's acceptor behaviour is a Java class with no data table and no placeable surface at this pin.
+
+## Slice 16 — the promises/bowls gate: `blocked(no-placeable-acceptor-surface)` (2026-11-24)
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins
+`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`, game 26.3. **No package was built: 0.2.15 remains the
+delivered version.** The brief's gate fires; this is a complete stopped result, not a failed slice.
+No TDD, build, `fits` or e2e was run, so there is no new sha to record.
+
+### Gate evidence (read from the artefact and the upstream clone, analysis only)
+
+1. **`promise_acceptor_*` is an item, not a block — no placeable surface.** The jar's only
+   acceptor entries are `org/cyclops/evilcraft/item/ItemPromiseAcceptor*.class` (4), three
+   `data/evilcraft/recipe/blood_infuser/core/promise_acceptor_*.json`, three
+   `assets/evilcraft/models/item/promise_acceptor_*.json` and one
+   `textures/item/promise_acceptor.png`. There is no `BlockPromiseAcceptor`, no blockstate and no
+   block model (grep of `unzip -Z1 … | grep -i accept` and of `blockstates` is exhaustive). Upstream
+   `ItemPromiseAcceptor.java` (clone tag `1.21.1-1.2.100`, commit `aa81220`) extends plain `Item`;
+   its only methods are `isFoil` (client glint), `getColor` (client tint) and `getType`. It has **no
+   server behaviour** — no use/place/break/tick, no menu, no tank, no data table driving behaviour
+   (its config class only registers a colour handler). It is a "blood reactant": an infusion
+   *ingredient*, nothing else.
+2. **The brief's required in-game assertion cannot be made.** It says "place one acceptor … read the
+   parsed infuser/**acceptor** readout". There is no acceptor block to place and no acceptor readout
+   in any command the port ships. The artefact disagrees with the dispatch prose; per `AGENTS.md`
+   the artefact wins and the agent reports.
+3. **The bowl/acceptor recipes are data tables, but their root is not carried.** Of the jar's 40
+   infuser files, the 7 named here (4 `core/bowl_of_promises_tier*`, 3
+   `core/promise_acceptor_*`) and the 7 crafting files below are all data. But
+   `bowl_of_promises_empty` needs `evilcraft:dark_power_gem` and `bowl_of_promises_dusted` needs
+   `evilcraft:dark_gem_crushed`; both root in `dark_block`/`dark_ore`, whose configured feature is
+   **inert at this pin** (the standing `blocked(configured-feature-not-registered)` row). Carrying
+   them would be dead data refused by
+   `runtime::every_carried_recipe_names_items_this_package_or_the_game_has`.
+4. **Two acceptor infusions are unreachable against the shipped tank.** `promise_acceptor_iron`
+   asks 10,000 mB, `…gold` 40,000 and `…diamond` **160,000 mB** against the port's 10,000 mB infuser
+   tank (slice 2 deviation 3 deliberately omits the tier tank multiplier) — the diamond file is
+   16× the tank, the same class as the 25,000 mB defect of slice 2.
+5. **The bowl's only behaviour is Java-only with no surface.** `ItemBowlOfPromises.getCraftingRemainingItem`
+   returns an empty bowl (the active bowls are "Not used up in crafting", the jar's own lang). No
+   data table drives it and `grep -rliE 'crafting_remaining|crafting_remainder|remaining_item'
+   ports/_shared/sdk/0a875da/api-source/` finds **no** SDK hook for a crafting remainder, so that
+   behaviour cannot be carried either.
+6. **The crafting recipes are 1.21.1 shapes.** Each uses `{"item": …}` ingredient objects and
+   nested `[[ … ]]` alternative arrays; `check_261_dialect.py` rejects `{"item": …}` in vanilla
+   crafting (slice 14 had to flatten seven such recipes), and nested alternatives are not a 26.3
+   vanilla crafting shape.
+
+### The recipes as read (source: `evilcraft-1.21.1-neoforge-1.2.100.jar`, read-only `unzip -p`)
+
+`data/evilcraft/recipe/blood_infuser/core/` — all `"type": "evilcraft:blood_infuser"`, input fluid
+`evilcraft:blood`, `xp` recorded but not awarded (slice 2 deviation 1):
+
+| file | input | blood | output | duration | tier |
+|---|---|---:|---|---:|---:|
+| `bowl_of_promises_tier0.json` | `bowl_of_promises_dusted` | 5000 | `bowl_of_promises_tier0` | 1000 | 0 |
+| `bowl_of_promises_tier1.json` | `bowl_of_promises_dusted` | 5000 | `bowl_of_promises_tier1` | 1000 | 1 |
+| `bowl_of_promises_tier2.json` | `bowl_of_promises_dusted` | 5000 | `bowl_of_promises_tier2` | 1000 | 2 |
+| `bowl_of_promises_tier3.json` | `bowl_of_promises_dusted` | 5000 | `bowl_of_promises_tier3` | 1000 | 3 |
+| `promise_acceptor_iron.json` | `minecraft:iron_block` | 10000 | `promise_acceptor_iron` | 500 | 0 |
+| `promise_acceptor_gold.json` | `minecraft:gold_block` | 40000 | `promise_acceptor_gold` | 2000 | 1 |
+| `promise_acceptor_diamond.json` | `minecraft:diamond_block` | 160000 | `promise_acceptor_diamond` | 5000 | 2 |
+
+`data/evilcraft/recipe/crafting/` (all 26.3-incompatible shapes, see evidence 6):
+`bowl_of_promises_empty` (3× `dark_power_gem`, shaped `G G`/` G `); `bowl_of_promises_dusted`
+(bowl_empty + 2× `dark_gem_crushed`); `promise_tier_1` (bowls tier0–3 + iron acceptor +
+`minecraft:spider_eye`); `promise_tier_2` (bowls tier1–3 + gold acceptor + `c:ender_pearls`);
+`promise_tier_3` (bowls tier2–3 + diamond acceptor + `minecraft:ender_eye`); `promise_speed_0`
+(bowls tier1–3 + iron acceptor + `c:storage_blocks/redstone`); `promise_efficiency_0` (bowls
+tier1–3 + iron acceptor + `c:storage_blocks/lapis`).
+
+### Coverage rows this result closes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `promise_acceptor_{iron,gold,diamond}` items | blocked(no-placeable-acceptor-surface) | item-only Java class, no block/blockstate/use/tick; evidence 1–2 |
+| `bowl_of_promises_*` crafting chain | blocked(inert-worldgen-dark-gem-root) | evidence 3, 6 (`dark_power_gem`/`dark_gem_crushed` root in inert `dark_ore`) |
+| `bowl_of_promises_tier*` infuser recipes | blocked(inert-worldgen-dark-gem-root) | evidence 3 (4 data tables, input bowl is unobtainable in survival at this pin) |
+| `promise_{speed,efficiency}_0` and tier-1..3 promise crafting | blocked(inert-worldgen-dark-gem-root) | evidence 3, 6 |
+| `broom_part_rod_undead` / broom family | not ported | no broom family (unchanged) |
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,systematic-debugging,verification-before-completion; BeautifulRust/none (no Rust change — the gate stopped the slice before implementation)
+
+## Next slice
+
+**Family:** the remaining vanilla-keyed Blood Infuser recipes the port has not carried — from
+slice 2's coverage row "`31 of the jar's 40 infuser recipes | not ported | their input or output is
+an evilcraft item this package does not carry`". Audit `data/evilcraft/recipe/blood_infuser/{base,convenience}/`
+(40 files, 12 carried) and carry the next file whose input and output are both vanilla ids or ids
+this package already registers — `runtime::every_carried_recipe_names_items_this_package_or_the_game_has`
+is the gate, exactly as it was for `base/blook.json` and the two undead files. The bowl/acceptor
+`core/` files are **not** candidates (blocked above).
+**Why it fits:** `data`/`logic` inside tier `deep`; the Blood Infuser is already carried, so this is
+one more data file plus its `CARRIED` declaration and item ids — no new machine, block, entity,
+renderer or worldgen.
+**In-game assertion:** `/evilcraft infuser <pos>` must read `recipes 12/12+N` (the count rises by the
+number carried, as 10/10 → 12/12 did in slice 15); `/evilcraft load <pos> 1 <input-id>` and
+`/evilcraft blood <pos> <amount>` then N ticks must make the readout show `out <output-id>@<count>`
+and a tank drop of exactly the jar's `input_fluid.amount`, over the jar's `duration`, at the jar's
+`duration`'s declared `tier`; a tier below the declared one (tier 0 where the file says ≥1) must
+leave the input untouched and spend nothing, as AO's undead-planks window did; `SELFTEST=<name>`
+inverts one output equality and ends `EXIT:1`.
+**Stop condition:** if no remaining file names only registered ids, report `blocked(<symbol>)`
+rather than inventing an item or reviving inert worldgen.
+
+## Slice 16 (0.2.16) — the remaining vanilla-keyed Blood Infuser recipe
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job W1-evilcraft --port ports/evilcraft` forwarded to
+**AdLf-PC** (`build-slot: forwarding … to the remote runner`); the launcher build and the e2e legs
+stayed local. `CARGO_INCREMENTAL=0`, no `--target-dir`, no `BUILD_LOCAL=1`, no raised slots.
+Licence **CC BY 4.0** for code and images (MIT also declared), rank 0. **Update to 0.2.16**: the
+entry on `main` is ours, so the PR is `Update evilcraft 0.2.16` (0.2.15 staged on #1862); the
+registry entry, the PR and the ledger are the orchestrator's.
+
+### Candidate audit (the 40 jar files, parsed from `input_item`/`output_item`)
+
+The gap line is slice 2's coverage row, quoted verbatim in the preceding `## Next slice`:
+*"31 of the jar's 40 infuser recipes | not ported | their input or output is an evilcraft item
+this package does not carry"*. All 40 `data/evilcraft/recipe/blood_infuser/` files were dumped and
+each file's input and output id classified against `runtime::CARRIED_ITEMS` + `minecraft:`:
+
+- **12 already carried** (9 `convenience/`, `base/blook`, the two undead `base/`).
+- **7 `core/` files** are excluded by the slice-16 promises gate (`blocked(...)`: no placeable
+  acceptor surface, inert dark-ore root, tank over-capacity) — not candidates.
+- **20 of the remaining 21 `base/`+`convenience/` files fail**: 17 name an un-carried evilcraft
+  id (`blood_orb_empty`, `dark_gem`, `potentia_sphere`, `ender_tear`, `dull_dust`,
+  `flesh_humanoid`, …); `evilcraft_blood_waxed_coal.json` uses the `minecraft:coals` **tag** and an
+  un-carried output; `minecraft_leather.json` is both ids vanilla but is the **upstream defect**
+  of slice 2 (rotten flesh at tier 1 always loses to the carried tier-2 spider-eye file, so it is
+  unreachable dead data — `a_rotten_flesh_makes_eight_spider_eyes`); `minecraft_wither_skeleton_skull.json`
+  is both ids vanilla but asks **25,000 mB** of the 10,000 mB tank (the other slice-2 defect,
+  refused by `every_carried_recipe_fits_its_tank_and_names_a_tier`).
+- **The one qualifying file** is `convenience/minecraft_fermented_spider_eye.json`:
+  `minecraft:spider_eye` → `minecraft:fermented_spider_eye@1`, **1,500 mB**, **500 ticks**, **tier 2**.
+  Both ids are vanilla, the cost fits the tank, the tier is in `0..=3`, and no other carried recipe
+  uses spider_eye as an *input*, so there is no highest-tier conflict. It is the **cheapest honest**
+  file: one data file + one `CARRIED` entry + one rule test + one in-game phase.
+
+**Tier:** `deep` still governs the port; this slice is `data`/`logic` inside it — one data file,
+its declaration and the ids it names. No block, block entity, item, entity, renderer, hook or
+worldgen. The file is carried byte for byte at
+`data/evilcraft/recipe/blood_infuser/minecraft_fermented_spider_eye.json` (the other convenience
+files were flattened the same way); the 26.3 dialect checker reads it `ok`.
+
+### TDD: the red proof, before the carry
+
+`sdk-test-red-slice16.log` (the count test renamed to thirteen and the new rule written, with no
+data file and no `CARRIED` entry yet):
+
+```
+test result: FAILED. 90 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_spider_eye_becomes_a_fermented_spider_eye_at_tier_two stdout ----
+thread 'runtime::tests::a_spider_eye_becomes_a_fermented_spider_eye_at_tier_two' (972817) panicked at src/runtime.rs:1627:14:
+a spider eye is infused at tier 2
+
+---- runtime::tests::the_infuser_carries_thirteen_recipes stdout ----
+thread 'runtime::tests::the_infuser_carries_thirteen_recipes' (972844) panicked at src/runtime.rs:1610:9:
+assertion `left == right` failed
+  left: 12
+ right: 13
+
+error: test failed, to rerun pass `--lib`
+```
+
+Green: `sdk-test.log` — **92 passed, 0 failed** (regenerated after the final build); `sdk-clippy.log`
+— `cargo fmt --check` clean, `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (all in `build-slot.sh` leases, forwarded to AdLf-PC)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (file not carried) | **FAILED 2/92** | `sdk-test-red-slice16.log` |
+| tests (green) | `cargo test` | **92 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 629 API uses, 23 hooks, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **269,898 B** `d3dd3c59…0546`, **`CMP-IDENTICAL`**, 212 entries, no `Cargo.lock` | `sdk-build-a/b/cmp-0.2.16.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `CHECK_EXIT:0` | `sdk-check-fits-0.2.16.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `FIT_PIN_EXIT:0` | `sdk-check-fits-0.2.16.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `FIT_OTHER_EXIT:0` | `sdk-check-fits-0.2.16.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** — 92 tests, 0 warnings, runtime byte-identical, **package matches the tree**, R9 clean, check + fits, Skills gate PASS | `sdk-gate-0.2.16.log` |
+| dialect gate | `python3 ports/tools/check_261_dialect.py evilcraft.hmod` | 37 recipe/loot files; the new recipe `ok`; unchanged slice-1 `"rolls": 1.0` | job report |
+| artifact record | `sdk-artifact-0.2.16.txt` | bytes/sha/entries/manifest, check and fits lines | `sdk-artifact-0.2.16.txt` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-ded928b49a05`, `Compiling evilcraft (1 of 1)`; export `src/`, `data/`, `assets/` and manifest byte-identical to the port | `launcher-build-0.2.16.log`, `sdk-export-check-0.2.16.log` |
+
+`LICENSE-NOTICE.md` credits all thirteen recipes (and `tools/stamp_license.py` was re-run) **before**
+the final build, so the gate's "package matches the tree" is green; `sdk-test.log` was regenerated
+as the last remote step, after the builds had pulled evidence back.
+
+### The in-game leg (`ports/_shared/evidence/evilcraft-e2e/`)
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`, `OLD14=1`, `OLD15=1`) | **`PASS` + `EXIT:0`** — every earlier phase plus the 0.2.14 (10/10) and 0.2.15 (12/12) readouts and AP | `e2e-launcher-0.2.16.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.16.log` |
+| selftest (this slice) | `SELFTEST=fermented` | **`FAIL` + `EXIT:1`** at AP — *SELFTEST flipped: the spider eye became minecraft:fermented_spider_eye, as it should* | `e2e-launcher-selftest-fermented-0.2.16.log` |
+| flakes (kept) | default attempts 1 and 2 | `EXIT:1` at AM's face placement (an entity in the target cell) and N's survival break | `e2e-launcher-0.2.16-attempt{1,2}.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=42 ok=42 missing-exit=0
+bad-exit=0` (exit 0): all 37 earlier legs stay green and the three 0.2.16 verdict legs plus the two
+kept flakes end in `EXIT:<n>`.
+
+Transcript of the new phase (verbatim from `e2e-launcher-0.2.16.log`):
+
+```
+== AP: a spider eye is infused for 1,500 mB over 500 ticks at tier 2 ==
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 0, cont empty@0, in minecraft:spider_eye@1, out empty@0, progress 0, recipes 13/13 t=10443
+  560 ticks at tier 0: the spider eye is untouched, no product, 10000 mB left
+  Blood Infuser [206, 101, 0]: tank 10000/10000 mB, tier 2, cont empty@0, in minecraft:spider_eye@1, out empty@0, progress 25, recipes 13/13 t=10475
+  Blood Infuser [206, 101, 0]: tank 8500/10000 mB, tier 2, cont empty@0, in empty@0, out minecraft:fermented_spider_eye@1, progress 0, recipes 13/13 t=11043
+  tier 2: spider_eye -> fermented_spider_eye@1 for 1,500 mB in 500 ticks, tank 8500
+  took 1 x minecraft:fermented_spider_eye out of the result slot into inventory slot 13
+```
+
+**Fail-capable four ways.** (1) `SELFTEST=fermented` inverts AP's own output equality and exits 1
+(log above). (2) The tier-0 window is the differential on the same machine, tank and input: 560
+ticks consume and spend nothing without a promise, while the same input yields one fermented eye
+for 1,500 mB at tier 2 (the file's declared tier). (3) The 0.2.15 leg reads 12/12 on the same rig
+where H and AP read 13/13 (and the 0.2.14 leg reads 10/10). (4) The whole-package control has no
+infuser to place. The tank assertion is exact — 10,000 → 8,500, exactly the file's
+`input_fluid.amount`, not a bound.
+
+Harness stabilization: the AM phase now clears non-player entities within eight blocks before each
+`ctl place` (the End spawns endermen into the arena as ticks pass; one in the target cell makes
+`ctl place` answer *"the block did not change (blocked by an entity)"*, the slice-14 AM flake).
+This changes no assertion — only the setup of a phase already in the suite.
+
+### Coverage row this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `convenience/minecraft_fermented_spider_eye.json` | **tested** | AP: 13/13 readout; spider eye inert at tier 0 over 560 ticks, one `minecraft:fermented_spider_eye@1` for exactly 1,500 mB in 500 ticks at tier 2, input consumed, product taken |
+| the carried-id gate for the new file | **tested** | `every_carried_recipe_names_items_this_package_or_the_game_has` (both ids vanilla), `every_carried_recipe_fits_its_tank_and_names_a_tier` (1,500 ≤ 10,000, tier 2) |
+| `minecraft_leather.json`, `minecraft_wither_skeleton_skull.json` (the two vanilla-keyed but defective files) | not ported | upstream defects of slice 2: shadowed by the tier-2 spider-eye file / 25,000 mB > 10,000 mB tank; carrying them would be dead data |
+| the other 18 un-carried `base`/`convenience` files | not ported | their input or output is an evilcraft item this package does not carry |
+
+### Changelog for the record (0.2.16, verbatim)
+
+> 0.2.16 — the final vanilla-keyed Blood Infuser recipe from the 1.2.100 jar is carried byte for
+> byte: a Spider Eye becomes one Fermented Spider Eye for exactly 1,500 mB in 500 ticks at tier 2.
+> The infuser now reads 13/13 recipe files where 0.2.15 read 12/12 (0.2.14: 10/10). 92 tests, two
+> identical builds, the in-game leg green with a new fail-capable phase AP, a tier-0 differential,
+> a package-less control and a `SELFTEST=fermented` that ends `EXIT:1`.
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices
+
+## Next slice
+
+**Family:** the remaining un-carried infuser files all name an evilcraft item this package does
+not register (`blood_orb_empty`, `dark_gem`, `potentia_sphere`, `ender_tear`, `dull_dust`,
+`flesh_humanoid`, …), and the two that are vanilla-keyed are the recorded upstream defects
+(shadowed `minecraft_leather.json`, over-capacity `minecraft_wither_skeleton_skull.json`). The
+`core/` bowl/acceptor files remain `blocked(no-placeable-acceptor-surface)` /
+`blocked(inert-worldgen-dark-gem-root)` from slice 16. **There is no remaining file that passes
+`every_carried_recipe_names_items_this_package_or_the_game_has`.** The next *implementable* family
+is therefore outside the infuser recipe list: the port's own documented gaps — e.g. the
+`spirit_furnace`/`spirit_reanimator` machines or the environmental accumulator — but each of those
+needs a new machine/block entity and a parent surface this package does not carry, so the gate says
+to **stop** rather than invent an item or revive inert worldgen. The correct next action is a
+different port from `port_queue.py`, not another evilcraft slice at this pin; if a future slice
+carries those parent items, re-audit the 18 files with the same gate first.
 

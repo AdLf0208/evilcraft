@@ -1,6 +1,6 @@
 id = "evilcraft"
 name = "EvilCraft"
-version = "0.2.15"
+version = "0.2.16"
 description = """A port of EvilCraft's blood economy for Horizon: the Blood Extractor fills with
 the blood of a mob its carrier kills (floor(hp x 5) to floor(hp x 40) mB), a mob that dies from
 fall damage leaves a Blood Stain holding 20 mB for each point of its max health, a crouching
@@ -18,7 +18,8 @@ back, clamped to its own capacity. The Undead Wood set — logs and wood (both s
 planks, stairs, slab, fence, fence gate, leaves and sapling — is carried with the jar's own
 seven crafting recipes; Undead Planks are crafted four at a time from an undead log, and the
 same Blood Infuser makes an Undead Sapling from a dead bush for 800 mB and Reinforced Undead
-Planks from Undead Planks for 1,000 mB."""
+Planks from Undead Planks for 1,000 mB. Its thirteen carried infusion recipes also turn a Spider
+Eye into a Fermented Spider Eye for 1,500 mB over 500 ticks at tier two."""
 authors = ["rubensworks (kroeser)", "AdLf0208"]
 # A native mod: Rust in src/, compiled by the launcher against the game build [native] pins,
 # beside data/ and assets/. The id is the resource namespace and the only identity.

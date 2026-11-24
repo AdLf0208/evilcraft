@@ -36,13 +36,14 @@ MIT grant on record as the build metadata's alternative.
   - the textures listed in the grant paragraph above — every one the jar's image, unchanged;
     the chest's block texture is the jar's `colossal_blood_chest.png` under the name
     `blood_chest.png`, and the Blook's and the Purifier's three arrived with 0.2.9;
-  - **the twelve Blood Infuser recipes** the package carries, byte for byte: the nine
+  - **the thirteen Blood Infuser recipes** the package carries, byte for byte: the ten
     `convenience/` files — `minecraft_blaze_rod.json`, `minecraft_creeper_head.json`,
-    `minecraft_grass_block.json`, `minecraft_nether_wart.json`, `minecraft_netherrack.json`,
-    `minecraft_red_mushroom.json`, `minecraft_soul_sand.json`, `minecraft_spider_eye.json`,
-    `minecraft_zombie_head.json` — and `base/blook.json` (0.2.9), plus the two undead-tree
-    `base/` files `base/undead_sapling.json` and `base/reinforced_undead_planks.json` (0.2.15).
-    The **only** change for the nine convenience files is the directory: upstream's
+    `minecraft_fermented_spider_eye.json` (0.2.16), `minecraft_grass_block.json`,
+    `minecraft_nether_wart.json`, `minecraft_netherrack.json`, `minecraft_red_mushroom.json`,
+    `minecraft_soul_sand.json`, `minecraft_spider_eye.json`, `minecraft_zombie_head.json` — and
+    `base/blook.json` (0.2.9), plus the two undead-tree `base/` files
+    `base/undead_sapling.json` and `base/reinforced_undead_planks.json` (0.2.15).
+    The **only** change for the ten convenience files is the directory: upstream's
     `data/evilcraft/recipe/blood_infuser/convenience/<file>` is this package's
     `data/evilcraft/recipe/blood_infuser/<file>`; the three `base/` files keep their upstream
     path. No recipe's `type`, `input_item`, `input_fluid`, `output_item`, `duration`, `xp` or
