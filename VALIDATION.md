@@ -576,3 +576,62 @@ What the new phases measured (from `e2e-launcher-0.2.10.log`):
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 16/16 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1.
+
+## Slice 11 (0.2.11) — the Vengeance Pickaxe's purifier immunity
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job G12-evilcraft --port ports/evilcraft` were forwarded
+to **AdLf-PC** (`build-slot: forwarding test for ports/evilcraft to the remote runner`; remote
+root `/home/deepseek/atm10`, rust 1.95); the e2e legs stay local (`--step e2e` is not forwarded).
+`CARGO_INCREMENTAL=0`, no `--target-dir`, no `BUILD_LOCAL=1`.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| TDD red | `cargo test` (rules stubbed) | **FAILED 1/75** — `a_vengeance_pickaxes_curse_is_immune_to_the_purifier`, `left: 1 / right: 0` | `sdk-test-red-slice11.log` |
+| unit tests | `cargo test` | **75 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-93e85970f01e`, `Compiling evilcraft (1 of 1)`; export byte-identical to the port | `launcher-build-0.2.11.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **228,363 B**, sha256 `e80f46bf8feb2d6f40c2947abc34d7d95a72a78a19a9cfa10a3d57b36746f25d`, `CMP-IDENTICAL`, 117 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha | `sdk-check-fits.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for` | `sdk-check-fits.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits` | `sdk-check-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | `sdk-artifact-0.2.11.txt` |
+| default | `tools/e2e.sh` (`OLD=1` for 0.2.3, `LEGACY=1` for 0.2.9) | **`PASS` + `EXIT:0`** — the two previous-package legs, A, A2, B–F, D2, D3, E2, H–W, Y, Y2, Z, AA–AI, **AJ** | `e2e-launcher-0.2.11.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.11.log` |
+| selftest (this slice) | `SELFTEST=vengeance` | **`FAIL` + `EXIT:1`** at AJ — *after 140 ticks the Vengeance Pickaxe carries 0 curse(s), expected its curse kept* | `e2e-launcher-selftest-vengeance-0.2.11.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=19 ok=19 missing-exit=0
+bad-exit=0` (exit 0): every earlier leg stays green, and the three 0.2.11 logs are this slice's.
+
+Transcript of the new phase (verbatim from `e2e-launcher-0.2.11.log`):
+
+```
+== AJ: a Vengeance Pickaxe's curse is immune to the Purifier's action ==
+  evilcraft:no_such_item is not an item this game has.
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=14387
+  the carried evilcraft:vengeance_pickaxe reads back in hand
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge evilcraft:vengeance_pickaxe@1, add empty@0, ench 1, curses 1, tick 0, t=14445
+  206, 101, -10 has the following block data: {components: {"minecraft:enchantments": {"minecraft:vanishing_curse": 1}}, count: 1, Slot: 0b, id: "evilcraft:vengeance_pickaxe"}
+  the saved Vengeance Pickaxe carries the curse
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge evilcraft:vengeance_pickaxe@1, add empty@0, ench 1, curses 1, tick 0, t=14613
+  the Vengeance Pickaxe kept its curse and the tank stayed 3000/3000 mB after 140 ticks
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=14679
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 1, curses 1, tick 20, t=14765
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 0, curses 0, tick 0, t=14919
+  the same curse on a vanilla pickaxe was stripped for one bucket (the item is the difference)
+```
+
+**Fail-capable, three ways.** (1) `SELFTEST=vengeance` inverts AJ's own assertion and exits 1.
+(2) The second half of AJ is the differential on the *same* machine, tank and 140 ticks: a cursed
+vanilla pickaxe loses its curse and the tank falls to 2,000, so a global "never purify" change
+would fail it. (3) The whole-package control has no purifier, so AJ cannot even place one.
+An unknown id is refused by `/evilcraft load` before the item is given.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 19/19 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).

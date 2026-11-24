@@ -27,7 +27,7 @@ use mod_api::{
 
 use crate::runtime::{
     BUCKET, PURIFIER, PURIFIER_ADDITIONAL_SLOT, PURIFIER_PURIFY_SLOT, PURIFIER_SLOTS,
-    PURIFIER_TANK, is_curse, purified, purify_tick,
+    PURIFIER_TANK, is_curse, purifiable_curses, purified_for, purify_tick,
 };
 
 /// The block entity type: a bare name, so the mod's namespace qualifies it.
@@ -217,15 +217,22 @@ impl BlockEntityPart for Purifier {
         let tick = crate::blood::read_int(&entity.nbt, TICK)
             .unwrap_or(0)
             .max(0) as u32;
-        let levels = enchantment_levels(entity.items[PURIFIER_PURIFY_SLOT].as_ref());
-        let curses = levels.iter().filter(|(id, _)| is_curse(id)).count();
+        let stack = entity.items[PURIFIER_PURIFY_SLOT].as_ref();
+        let levels = enchantment_levels(stack);
+        // `ToolBadEnchantPurifyAction` guards both `canWork` and `work` with
+        // `!(purifyItem.getItem() instanceof ItemVengeancePickaxe)`: the pickaxe's own curse is
+        // immune, so the machine's clock resets here and the tank is never charged. The id is
+        // read from the stack, not from a Part match, because the purge slot holds any item.
+        let item_id = stack.map_or(String::new(), |stack| stack.item().id(&*host));
+        let item = item_id.as_str();
+        let curses = purifiable_curses(item, &levels);
         let mut next = 0;
         match purify_tick(tick, curses, tank) {
             // `canWork` refused: the clock resets and nothing is spent.
             None => {}
             Some((after, false)) => next = after,
             Some((_, true)) => {
-                let (kept, spent) = purified(&levels);
+                let (kept, spent) = purified_for(item, &levels);
                 if let Some(stack) = entity.items[PURIFIER_PURIFY_SLOT].as_mut() {
                     write_enchantments(stack, &kept);
                 }

@@ -156,12 +156,15 @@ pub const EXTRACTOR: &str = "evilcraft:blood_extractor";
 pub const STAIN: &str = "evilcraft:blood_stain";
 /// `ItemBlookConfig`: a Book infused with Blood (`ItemBlookConfig` registers a plain item).
 pub const BLOOK: &str = "evilcraft:blook";
-/// Every item id this package registers besides vanilla's: the extractor, the blook and the
-/// three tier promises (`data/evilcraft/horizon/item/`). A carried recipe may name these or
-/// `minecraft:`; nothing else is an item the game or the package has.
+/// `ItemVengeancePickaxe`: the tool the Purifier's curse action refuses to touch.
+pub const VENGEANCE_PICKAXE: &str = "evilcraft:vengeance_pickaxe";
+/// Every item id this package registers besides vanilla's: the extractor, the blook, the
+/// Vengeance Pickaxe and the three tier promises (`data/evilcraft/horizon/item/`). A carried
+/// recipe may name these or `minecraft:`; nothing else is an item the game or the package has.
 pub const CARRIED_ITEMS: &[&str] = &[
     EXTRACTOR,
     BLOOK,
+    VENGEANCE_PICKAXE,
     "evilcraft:promise_tier_1",
     "evilcraft:promise_tier_2",
     "evilcraft:promise_tier_3",
@@ -715,6 +718,33 @@ pub fn purified(levels: &[(String, u32)]) -> (Vec<(String, u32)>, i32) {
         })
         .collect();
     (kept, curses)
+}
+
+/// The curses `ToolBadEnchantPurifyAction` will act on for this stack.
+///
+/// Both `canWork` and `work` guard every curse with
+/// `!(purifyItem.getItem() instanceof ItemVengeancePickaxe)`, so a Vengeance Pickaxe's curses
+/// are never counted: `canWork` refuses the machine (the clock resets, no blood is spent) and
+/// `work` would not touch the stack. Upstream crafts this pickaxe with the `evilcraft:vengeance`
+/// curse precisely so it survives its own Purifier.
+#[must_use]
+pub fn purifiable_curses(item: &str, levels: &[(String, u32)]) -> usize {
+    if item == VENGEANCE_PICKAXE {
+        return 0;
+    }
+    levels.iter().filter(|(id, _)| is_curse(id)).count()
+}
+
+/// A completed action applied to this stack, with the same immunity as `purifiable_curses`.
+///
+/// The caller only reaches this on the duration tick, which a refused item never sees; keeping
+/// the guard here too means a stack swapped mid-tick cannot lose its curses either.
+#[must_use]
+pub fn purified_for(item: &str, levels: &[(String, u32)]) -> (Vec<(String, u32)>, i32) {
+    if item == VENGEANCE_PICKAXE {
+        return (levels.to_vec(), 0);
+    }
+    purified(levels)
 }
 
 #[cfg(test)]
@@ -1497,6 +1527,39 @@ mod tests {
         // And a stack with no curse is written back unchanged.
         let plain = levels(&[("minecraft:sharpness", 2)]);
         assert_eq!(purified(&plain), (plain.clone(), 0));
+    }
+
+    #[test]
+    fn a_vengeance_pickaxes_curse_is_immune_to_the_purifier() {
+        // `ToolBadEnchantPurifyAction.canWork` and `.work` both guard every curse with
+        // `!(purifyItem.getItem() instanceof ItemVengeancePickaxe)`: a cursed Vengeance Pickaxe
+        // is refused, so the clock resets and not one bucket of blood is spent.
+        let cursed = levels(&[("minecraft:vanishing_curse", 1)]);
+        assert_eq!(purifiable_curses(VENGEANCE_PICKAXE, &cursed), 0);
+        assert_eq!(
+            purified_for(VENGEANCE_PICKAXE, &cursed),
+            (cursed.clone(), 0),
+            "the pickaxe keeps its curse and the tank is untouched"
+        );
+        // The same rule must also refuse a level-2 curse (the action strips one level).
+        let deeper = levels(&[("minecraft:binding_curse", 2)]);
+        assert_eq!(purifiable_curses(VENGEANCE_PICKAXE, &deeper), 0);
+        assert_eq!(purified_for(VENGEANCE_PICKAXE, &deeper), (deeper, 0));
+    }
+
+    #[test]
+    fn the_immunity_is_only_for_the_vengeance_pickaxe() {
+        // The differential: an ordinary pickaxe with the same curse is purified as slice 9
+        // proved in game (one level gone, one bucket spent). The immunity is an item check,
+        // not a change to what counts as a curse.
+        let cursed = levels(&[("minecraft:vanishing_curse", 1)]);
+        assert_eq!(purifiable_curses("minecraft:diamond_pickaxe", &cursed), 1);
+        assert_eq!(
+            purified_for("minecraft:diamond_pickaxe", &cursed),
+            (Vec::new(), 1)
+        );
+        // Carrying the item means the id is one this package actually registers.
+        assert!(CARRIED_ITEMS.contains(&VENGEANCE_PICKAXE));
     }
 
     #[test]

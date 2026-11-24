@@ -20,5 +20,7 @@
   "item.evilcraft.promise_tier_2.info": "Machine tier upgrade, also usable for lower tier recipes.",
   "item.evilcraft.promise_tier_3": "Promise of Tenacity III",
   "item.evilcraft.promise_tier_3.info": "Machine tier upgrade, also usable for lower tier recipes.",
+  "item.evilcraft.vengeance_pickaxe": "Vengeance Pickaxe",
+  "item.evilcraft.vengeance_pickaxe.info": "Might summon Vengeance Spirits. Its curses survive the Purifier.",
   "itemGroup.evilcraft": "EvilCraft"
 }

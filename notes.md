@@ -2553,3 +2553,157 @@ Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-de
 > byte-identical to the jar, and the Blook's and Purifier's textures and two more upstream
 > blockstates/models. 73 tests, two identical builds, the in-game leg green (two new phases on the
 > anvil stack and the legacy extractor stack, plus two selftests that fail as they must).
+
+## Slice 11 — the Vengeance Pickaxe's purifier immunity (0.2.11)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.11**
+on top of the published 0.2.10 (an Update of our own entry; the registry entry, the PR and the
+ledger are the orchestrator's). The full design, including the alternative slices considered, is
+in `tools/slice11-plan.md`.
+
+### The gap this slice closes — and a correction to the brief
+
+From slice 9's coverage table:
+
+> | `ItemVengeancePickaxe` immunity | not ported | the item is not carried, so no stack can match it |
+
+The dispatch note guessed a damage-source immunity ("a named attacker wearing/holding it is
+immune to the pickaxe's revenge damage") and suggested naming a missing damage-source symbol.
+**The artefact disagrees, and wins.** Read from the upstream clone
+(`ports/_shared/upstream/evilcraft`, tag `1.21.1-1.2.100`, `ToolBadEnchantPurifyAction.java:40,73`),
+`canWork` and `work` both guard every curse with
+`enchantment.is(EnchantmentTags.CURSE) && !(purifyItem.getItem() instanceof ItemVengeancePickaxe)`:
+the immunity is **the Purifier's curse action refusing to strip curses from the Vengeance Pickaxe**.
+`ItemVengeancePickaxe.java` only sets a 1.25× destroy speed and the enchanted stack it is crafted
+as (`minecraft:fortune` 5 + `evilcraft:vengeance` 3); `evilcraft:vengeance` is in the jar's
+`data/minecraft/tags/enchantment/curse.json`. So no damage hook, HurtSource query or entity is
+needed — none was invented, and no `blocked(<symbol>)` applies.
+
+**Tier:** `deep` still governs the port; this slice is a `logic` family inside it — one carried
+item and one rule on the machine slice 9 already ships. No block entity, entity, renderer or
+dimension added.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Item | `evilcraft:vengeance_pickaxe`, template `minecraft:diamond_pickaxe`, its 101 B item model and 254 B texture carried byte for byte, two lang keys, creative row | jar `assets/evilcraft/models/item/vengeance_pickaxe.json`, `textures/item/vengeance_pickaxe.png`, `en_us.json`; `ItemVengeancePickaxe` |
+| Rule | `runtime::purifiable_curses(item, levels)` and `purified_for(item, levels)`: a Vengeance Pickaxe has **zero** purifiable curses, so `canWork` resets the clock and spends no blood, and `work` would keep every enchantment | `ToolBadEnchantPurifyAction.canWork`/`work` |
+| Glue | the purge slot stack's id is read through `stack.item().id(host)` in the block-entity tick and passed to both rules; the harness readout still shows the real enchantment/curse count, so the immunity is visible | `src/purifier.rs` |
+
+Nothing else changed: the curse action's 60-tick duration, 1,000 mB bucket and the two vanilla
+curses are slice 9's. The crafting recipe is **not** carried (gap 1): it needs
+`evilcraft:hardened_blood_shard` and `evilcraft:dark_stick`, which this port does not have.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice11.log` (the two tests written, `purifiable_curses`/`purified_for` stubs
+ignoring the item id — the old behaviour):
+
+```
+test result: FAILED. 74 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_vengeance_pickaxes_curse_is_immune_to_the_purifier stdout ----
+thread 'runtime::tests::a_vengeance_pickaxes_curse_is_immune_to_the_purifier' (165696) panicked at src/runtime.rs:1524:9:
+assertion `left == right` failed
+  left: 1
+ right: 0
+```
+
+The differential test (`the_immunity_is_only_for_the_vengeance_pickaxe`) passed against the stub
+by construction — it is the boundary a *wrong* implementation breaks, not one the stub breaks.
+Green: `sdk-test.log` — **75 passed, 0 failed**; `sdk-clippy.log` — `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases, job `G12-evilcraft`, no `BUILD_LOCAL=1`, no `--target-dir`)
+
+Compile steps were forwarded: `build-slot: forwarding test for ports/evilcraft to the remote
+runner`, slot 1/5 / slot 2/5, remote box **AdLf-PC** (`/home/deepseek/atm10`, rust 1.95).
+The e2e legs stay local: `--step e2e` is not a forwarded step, and the launcher's game export
+needs the prepared 26.3 resources on this box.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` | **FAILED 1/75** (`EXIT:101`) | `sdk-test-red-slice11.log` |
+| tests (green) | `cargo test` | **75 passed, 0 failed** | `sdk-test.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-93e85970f01e`, `Compiling evilcraft (1 of 1)`; export `src/`, `data/`, `assets/`, `horizon-mod.toml` byte-identical to the port | `launcher-build-0.2.11.log` |
+| default leg | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`) | **`PASS` + `EXIT:0`** — every earlier phase plus AJ | `e2e-launcher-0.2.11.log` |
+| control | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — no chest item | `e2e-launcher-control-0.2.11.log` |
+| selftest | `SELFTEST=vengeance` | **`FAIL` + `EXIT:1`** at AJ — *the Vengeance Pickaxe carries 0 curse(s), expected its curse kept* | `e2e-launcher-selftest-vengeance-0.2.11.log` |
+| strict logs | `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` | `logs=19 ok=19 missing-exit=0 bad-exit=0`, exit 0 | job report |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **228,363 B**, sha256 `e80f46bf…25d`, **`CMP-IDENTICAL`**, 117 entries, no `Cargo.lock` | `sdk-build.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, exit 0 | `sdk-check-fits.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, exit 0 | `sdk-check-fits.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, exit 0 | `sdk-check-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (75 tests, 0 warnings, runtime byte-identical, package matches the tree, R9, no lock, check + fits, Skills line) | `sdk-artifact-0.2.11.txt` |
+
+### The in-game transcript (verbatim, `e2e-launcher-0.2.11.log`)
+
+```
+== AJ: a Vengeance Pickaxe's curse is immune to the Purifier's action ==
+  evilcraft:no_such_item is not an item this game has.
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=14387
+  the carried evilcraft:vengeance_pickaxe reads back in hand
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge evilcraft:vengeance_pickaxe@1, add empty@0, ench 1, curses 1, tick 0, t=14445
+  the saved Vengeance Pickaxe carries the curse
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge evilcraft:vengeance_pickaxe@1, add empty@0, ench 1, curses 1, tick 0, t=14613
+  the Vengeance Pickaxe kept its curse and the tank stayed 3000/3000 mB after 140 ticks
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 1, curses 1, tick 20, t=14765
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge minecraft:diamond_pickaxe@1, add empty@0, ench 0, curses 0, tick 0, t=14919
+  the same curse on a vanilla pickaxe was stripped for one bucket (the item is the difference)
+```
+
+`SELFTEST=vengeance` ends `EXIT:1` at AJ (*after 140 ticks the Vengeance Pickaxe carries 0
+curse(s), expected its curse kept*); the whole-package control ends `EXIT:1` when the chest item
+does not register. The vanilla half of AJ is the differential: the same machine, tank and
+140 ticks strip the curse from an ordinary pickaxe and spend 1,000 mB.
+
+**A harness trap fixed while writing this phase:** the first AJ draft called `saved_item`
+after the 140-tick wait, but that helper waits for a *changing* `/data get` reply — an immune
+stack's saved bytes deliberately never change, so it timed out (`no data get reply for Items[0]`)
+even though the product behaviour was already correct (`tank 3000`, `curses 1`, `ench 1`, `tick 0`).
+The phase now reads the server-side `/evilcraft purifier` readout after the wait, which is the
+same saved data and does change its `t=` suffix. The first `saved_item` call still proves the
+curse is on the stack before the wait.
+
+### Changelog for the record (0.2.11, verbatim)
+
+> 0.2.11 — the Vengeance Pickaxe is carried (the jar's own model, texture and lang) and its
+> immunity is honoured: upstream's Purifier curse action refuses that item, so a cursed pickaxe in
+> the Purifier keeps its curse, its full 3,000 mB tank and a reset action clock over 140 ticks,
+> while the same curse on a vanilla pickaxe is stripped for one bucket. The dispatch note's guess
+> of a damage-source immunity was corrected from the artefact: the real rule is an item-id guard
+> in `ToolBadEnchantPurifyAction`, so no damage hook or HurtSource query is needed. 75 tests, two
+> identical builds, the in-game leg green with a new fail-capable phase AJ plus a control and a
+> `SELFTEST=vengeance` that end `EXIT:1`.
+
+### Coverage table — the row this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `ItemVengeancePickaxe` immunity | **tested** | AJ: a full purifier and 140 ticks leave the pickaxe with 1 enchantment, 1 curse, the tank at 3,000/3,000 and the clock at 0; the same cursed vanilla pickaxe loses its curse and spends one bucket; unit `a_vengeance_pickaxes_curse_is_immune_to_the_purifier` |
+| `evilcraft:vengeance_pickaxe` item | **tested** | AJ: given from its own id, read back in hand, inserted by a click and read from the saved `Items[0]` |
+| the jar's `vengeance_pickaxe` recipe | not ported | gap 1: its ingredients (`hardened_blood_shard`, `dark_stick`) are not carried |
+| the `evilcraft:vengeance` enchantment and its spirit-summoning effect | not ported | Java entity effect, not expressible as content; the immunity is an item-id rule, so the in-game proof uses a vanilla curse |
+| particles, action bar | not ported | deviation 7 of slice 9 (unchanged) |
+
+### Deviations this slice adds
+
+1. **The item's 1.25× destroy speed and its `evilcraft:vengeance` enchantment are not carried.**
+   A content item with the `minecraft:diamond_pickaxe` template cannot set either; the jar's
+   model and texture are carried faithfully, and the in-game proof puts a vanilla curse on it so
+   the Purifier's own curse path runs. The immunity itself is the jar's item-id check.
+2. **A re-set of an equal tank value answers `has no blood tank` at this pin** (a `merge_data`
+   no-op), so the scenario relies on the tank already being full from phase AI rather than
+   re-setting it; the readout asserts it is 3,000 before and after the wait.
+
+### Upstream defects fixed
+
+None new. (`copy_tank_data`'s applier, the shadowed leather recipe, the 25,000 mB recipe, the
+missing pickaxe tag and the two slice-10 data-loss fixes are the earlier slices'.)
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port

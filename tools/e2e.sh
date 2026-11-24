@@ -143,6 +143,13 @@
 #  Y2 the Colossal Blood Chest does the same anvil step as D2 (two anvils for 250 mB, name
 #     kept; 125 mB leaves the stack alone).
 #
+# Slice 11 (0.2.11) — the Vengeance Pickaxe's immunity (`ToolBadEnchantPurifyAction`):
+#  AJ the carried `evilcraft:vengeance_pickaxe` is /give-n with a vanilla curse, put in the
+#     Purifier's slot with a standing click, and read back with **1 enchantment, 1 curse** and
+#     a full 3,000 mB tank after 140 ticks (the clock reset; `canWork` refused it); the same
+#     rig with a cursed vanilla diamond pickaxe strips the curse and spends one bucket, which
+#     is the item-id differential. An unknown id is refused by `/evilcraft load`.
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
@@ -164,8 +171,8 @@
 # SELFTEST=1 flips C's assertion, SELFTEST=infuser flips K's, SELFTEST=tank flips O's,
 # SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's,
 # SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour,
-# SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=anvil flips D2's anvil count and
-# SELFTEST=extractor flips E2's split (each
+# SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=vengeance flips AJ's immunity,
+# SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split (each
 # must FAIL), proving the scenarios can fail. Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
@@ -226,6 +233,10 @@ PURIFIER_TANK=3000
 # build's `/give` ("Failed to get element minecraft:levels from registry minecraft:enchantment"),
 # and SNBT's unquoted form allows no colon, so the enchantment id is quoted.
 CURSED_PICKAXE='minecraft:diamond_pickaxe[minecraft:enchantments={"minecraft:vanishing_curse":1}]'
+# Slice 11: the carried Vengeance Pickaxe (the item whose curses `ToolBadEnchantPurifyAction`
+# refuses to strip). The vanilla curse makes the purifier's own curse path run for it.
+VENGEANCE_PICKAXE=evilcraft:vengeance_pickaxe
+CURSED_VENGEANCE='evilcraft:vengeance_pickaxe[minecraft:enchantments={"minecraft:vanishing_curse":1}]'
 MB_PER_DAMAGE=5
 TICKS_PER_DAMAGE=2
 
@@ -2332,4 +2343,96 @@ saved_tank "$PUX" "$PUY" "$PUZ"
 [ "$SAVED_MB" = "$PURIFIER_TANK" ] || fail "the purifier's saved tank is $SAVED_MB mB"
 echo "  extractor 5000 -> $HELD_BLOOD mB, purifier tank $PURIFIED_TANK -> $TANK mB (the 1,000 mB room, the rest kept)"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), and the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks"
+echo "== AJ: a Vengeance Pickaxe's curse is immune to the Purifier's action =="
+# `ToolBadEnchantPurifyAction.canWork` and `.work` both guard every curse with
+# `!(purifyItem.getItem() instanceof ItemVengeancePickaxe)`: the pickaxe's own curse survives a
+# full tank and 140 ticks. The same rig with a cursed vanilla pickaxe strips the curse and spends
+# one bucket (phase AG's rule), which makes this an item-id rule, not a change to curses.
+ctl command "execute in minecraft:the_end run tp @s $((PUX - 2)).5 101 $PUZ.5" >/dev/null
+empty_hand
+# An unknown id is refused rather than written as a nameless stack (the item exists in the
+# package; this id does not).
+say "evilcraft load $PUX $PUY $PUZ 0 evilcraft:no_such_item"
+ctl wait 12 >/dev/null
+UNKNOWN=$(ctl messages 12 | jq -r '.chat[]' | grep -m1 'not an item this game has' || true)
+[ -n "$UNKNOWN" ] || fail "an unknown item id was accepted in the purifier: $(ctl messages 12 | jq -r '.chat[]' | tail -3)"
+echo "  $UNKNOWN"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = empty ] || fail "the refused unknown id wrote $PURGE_ITEM into the purge slot"
+
+ctl command "item replace entity @s hotbar.0 with $CURSED_VENGEANCE 1" >/dev/null
+ctl wait 6 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+HELD_ID=$(ctl inventory | jq -r '.held.item')
+[ "$HELD_ID" = "$VENGEANCE_PICKAXE" ] \
+    || fail "the Vengeance Pickaxe is not in hand: '$HELD_ID' (is the item registered?)"
+echo "  the carried $VENGEANCE_PICKAXE reads back in hand"
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = "$VENGEANCE_PICKAXE" ] \
+    || fail "the click put $PURGE_ITEM in the purge slot, expected the Vengeance Pickaxe"
+[ "$PURGE_COUNT" = 1 ] || fail "the purge slot holds $PURGE_COUNT pickaxes, expected one"
+[ "$ENCH" = 1 ] || fail "the Vengeance Pickaxe carries $ENCH enchantment(s), expected 1"
+[ "$CURSES" = 1 ] || fail "the Vengeance Pickaxe carries $CURSES curse(s), expected 1"
+[ "$TANK" = "$PURIFIER_TANK" ] || fail "the purifier tank is $TANK mB, expected $PURIFIER_TANK"
+saved_item "$PUX" "$PUY" "$PUZ" 0
+case "$SAVED_ITEM" in
+    *minecraft:enchantments*minecraft:vanishing_curse*)
+        echo "  the saved Vengeance Pickaxe carries the curse" >&2 ;;
+    *) fail "the purge slot's pickaxe has no curse in its saved item: '$SAVED_ITEM'" ;;
+esac
+
+# The tank is already full from AI (a re-set to the same value is a no-op at this pin).
+# After 140 ticks the *readout* is the assertion: it reads the saved stack and the saved
+# tank on the server, so `ench 1, curses 1` and an unchanged 3,000 mB prove the refusal.
+# (A second `/data get block … Items[0]` would wait for a *changing* reply, which a
+# deliberately unchanged stack never produces — the stale-line trap from slice 3.)
+ctl wait 140 >/dev/null
+purifier "$PUX" "$PUY" "$PUZ"
+IMMUNE_TANK=$TANK
+IMMUNE_ENCH=$ENCH
+IMMUNE_CURSES=$CURSES
+IMMUNE_TICK=$TICK
+if [ "$SELFTEST" = vengeance ]; then
+    echo "(selftest=vengeance: asserting the pickaxe's curse was stripped and blood spent)"
+    IMMUNE_ENCH=0
+    IMMUNE_CURSES=0
+    IMMUNE_TANK=$((PURIFIER_TANK - 1000))
+fi
+[ "$IMMUNE_CURSES" = 1 ] \
+    || fail "after 140 ticks the Vengeance Pickaxe carries $IMMUNE_CURSES curse(s), expected its curse kept"
+[ "$IMMUNE_ENCH" = 1 ] \
+    || fail "after 140 ticks the Vengeance Pickaxe carries $IMMUNE_ENCH enchantment(s), expected one"
+[ "$IMMUNE_TANK" = "$PURIFIER_TANK" ] \
+    || fail "the purifier spent $((PURIFIER_TANK - IMMUNE_TANK)) mB on the immune pickaxe, expected none"
+[ "$IMMUNE_TICK" = 0 ] \
+    || fail "the immune pickaxe left the action clock at $IMMUNE_TICK, expected 0 (canWork refused)"
+echo "  the Vengeance Pickaxe kept its curse and the tank stayed $IMMUNE_TANK/$PURIFIER_TANK mB after 140 ticks"
+
+# The differential: the same machine, tank, curse and 140 ticks on a vanilla pickaxe.
+# First take the immune pickaxe back out with an empty-hand click (`useWithoutItem`).
+empty_hand
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = empty ] \
+    || fail "the empty hand did not take the Vengeance Pickaxe back out ($PURGE_ITEM)"
+empty_hand
+ctl command "item replace entity @s hotbar.0 with $CURSED_PICKAXE 1" >/dev/null
+ctl wait 6 >/dev/null
+ctl select 1 >/dev/null
+ctl wait 2 >/dev/null
+[ "$(ctl inventory | jq -r '.held.item')" = minecraft:diamond_pickaxe ] \
+    || fail "the cursed vanilla pickaxe is not in hand"
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = minecraft:diamond_pickaxe ] \
+    || fail "the differential click put $PURGE_ITEM in the purge slot, expected the vanilla pickaxe"
+ctl wait 140 >/dev/null
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$CURSES" = 0 ] || fail "the vanilla pickaxe kept $CURSES curse(s), expected the action to strip it"
+[ "$TANK" = $((PURIFIER_TANK - 1000)) ] \
+    || fail "the vanilla pickaxe's purify left the tank at $TANK mB, expected $((PURIFIER_TANK - 1000))"
+echo "  the same curse on a vanilla pickaxe was stripped for one bucket (the item is the difference)"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket"
