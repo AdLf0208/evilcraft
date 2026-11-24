@@ -23,9 +23,10 @@ use mod_api::{
 };
 
 use crate::runtime::{
-    BLOOD, CHEST_SLOTS, CONTAINER_SLOT, Credit, EXTRACTOR, EXTRACTOR_CAPACITY, SLOT_COUNT,
-    TANK_CAPACITY, anvil_stack_step, blood_from_kill, can_hold, drain_container, fill_extractor,
-    kill_span, legacy_extractors, one_extractor, repair, repair_due,
+    BAD_ENCHANT_CHANCE, BLOOD, CHEST_SLOTS, CONTAINER_SLOT, Credit, CURSES, EXTRACTOR,
+    EXTRACTOR_CAPACITY, SLOT_COUNT, TANK_CAPACITY, add_curse, anvil_stack_step, bad_enchant_roll,
+    blood_from_kill, can_hold, curse_level, drain_container, fill_extractor, kill_span,
+    legacy_extractors, one_extractor, repair, repair_due, rolled_curse,
 };
 
 /// The block entity type: a bare name, so the mod's namespace qualifies it.
@@ -148,6 +149,12 @@ impl BlockEntityPart for Chest {
                         if let Some((left, tank_left)) = repair(damage, tank) {
                             write_damage(&mut stack, u32::try_from(left).unwrap_or(0));
                             tank = tank_left;
+                            // `DamageableItemRepairAction.repair`: the curse half of a
+                            // **non-bulk** damage repair (the ordinary Blood Chest only —
+                            // the Colossal's bulk action passes `isBulk = true` and never
+                            // curses). addRandomBadEnchants=true and chance>=0 are the
+                            // config constants; the roll is the level's own random.
+                            apply_curse(host, event.pos, &mut stack);
                         }
                     } else if let Some((next, tank_left)) =
                         anvil_stack_step(&item, stack.count(), tank)
@@ -198,6 +205,55 @@ impl BlockEntityPart for Chest {
         let at = [event.origin[0] + 8.0, event.origin[1] + 58.0];
         event.draw.text(&text, at, 0xFF40_4040, false);
     }
+}
+
+/// The curse half of `DamageableItemRepairAction.repair`, after the damage point has
+/// been repaired and the tank has paid. Upstream draws the roll, then (on a win) the
+/// curse index and the level from the same `RandomSource`; a harness-armed draw
+/// substitutes the first two for a deterministic in-game assertion. Nothing here runs
+/// for an anvil step or for the Colossal Chest's bulk repair.
+fn apply_curse(host: &mut dyn ServerHost, pos: [i32; 3], stack: &mut ItemStack) {
+    let forced = crate::curse::forced_for(pos);
+    let roll = match forced {
+        Some(forced) => forced.roll,
+        None => {
+            let drawn = host
+                .level(host.dimension())
+                .and_then(|level| {
+                    level.with_random(host, |random| {
+                        random
+                            .next_int_bound(BAD_ENCHANT_CHANCE as i32)
+                            .unwrap_or(-1)
+                    })
+                })
+                .unwrap_or(-1);
+            // A failed draw must not look like the winning roll 0.
+            u32::try_from(drawn).unwrap_or(BAD_ENCHANT_CHANCE)
+        }
+    };
+    if !bad_enchant_roll(roll) {
+        return;
+    }
+    let index = match forced {
+        Some(forced) => forced.index,
+        None => {
+            let drawn = host
+                .level(host.dimension())
+                .and_then(|level| {
+                    level.with_random(host, |random| {
+                        random.next_int_bound(CURSES.len() as i32).unwrap_or(-1)
+                    })
+                })
+                .unwrap_or(-1);
+            u32::try_from(drawn.max(0)).unwrap_or(0)
+        }
+    };
+    let Some(curse) = rolled_curse(index) else {
+        return;
+    };
+    let levels = crate::purifier::enchantment_levels(Some(stack));
+    let next = add_curse(&levels, curse, curse_level(0));
+    crate::purifier::write_enchantments(stack, &next);
 }
 
 #[mod_api::horizon_part]
@@ -450,6 +506,12 @@ pub fn register_commands(_host: &mut dyn ServerHost, event: &mut RegisterCommand
         "evilcraft purifier <pos:block_pos>",
         OPERATOR_LEVEL,
     ));
+    // The forced curse draw for one Blood Chest (test scaffolding: without one, the
+    // repair tick uses the level's random as upstream does). `roll = -1` disarms it.
+    event.commands.push(Command::op(
+        "evilcraft curse <pos:block_pos> <roll:integer> <index:integer>",
+        2,
+    ));
     // `<id:id>` is a free `namespace:path` identifier: a `word` argument stops at the
     // colon (the campaign's `item`-argument trap, so no `item` kind here).
     event.commands.push(Command::op(
@@ -479,11 +541,12 @@ pub fn run_command(host: &mut dyn ServerHost, event: &mut RunModCommandEvent<'_>
         "colossal" => crate::colossal::readout(host, source, invocation),
         "darktank" => crate::dark_tank::readout(host, source, invocation),
         "purifier" => crate::purifier::readout(host, source, invocation),
+        "curse" => set_curse(host, source, invocation),
         "load" => crate::infuser::load(host, source, invocation),
         "held" => held(host, source, invocation),
         _ => say(
             host,
-            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|darktank|purifier|load|held ..."
+            "usage: /evilcraft info|blood|damage|infuser|stain|colossal|darktank|purifier|curse|load|held ..."
                 .to_owned(),
         ),
     }
@@ -580,6 +643,45 @@ fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
     } else {
         say(host, format!("{pos:?} has no blood tank."));
     }
+}
+
+/// `/evilcraft curse <pos> <roll> <index>`: arm a deterministic curse draw for one
+/// Blood Chest's next repair ticks, so a scenario can reach the 1-in-10,000 branch.
+/// `roll = -1` removes the armed draw. The position must be this port's chest; a
+/// foreign block entity is never a target.
+fn set_curse(host: &mut dyn ServerHost, source: &CommandSource, invocation: &CommandInvocation) {
+    let usage = "usage: /evilcraft curse <x> <y> <z> <roll> <index>  (roll -1 clears)";
+    let (Some(pos), Some(roll), Some(index)) = (
+        block_pos(invocation),
+        integer(invocation, "roll"),
+        integer(invocation, "index"),
+    ) else {
+        say(host, usage.to_owned());
+        return;
+    };
+    if !may_read(source.permission()) {
+        say(host, format!("evilcraft curse needs an operator (permission level {OPERATOR_LEVEL})"));
+        return;
+    }
+    if our_entity(host, source, pos, CHEST_ID, "Blood Chest").is_none() {
+        return;
+    }
+    let clear = roll == -1;
+    let accepted = if clear {
+        crate::curse::set_forced(pos, 0, 0, true)
+    } else {
+        u32::try_from(roll).is_ok_and(|roll| {
+            u32::try_from(index).is_ok_and(|index| crate::curse::set_forced(pos, roll, index, false))
+        })
+    };
+    say(
+        host,
+        if accepted {
+            format!("{pos:?}: curse draw {} (index {index}).", if clear { "cleared" } else { "armed" })
+        } else {
+            format!("{pos:?}: roll must be -1 or 0..{}, index 0..{}.", BAD_ENCHANT_CHANCE, CURSES.len())
+        },
+    );
 }
 
 /// `/evilcraft damage <pos> <slot> <amount>`: set a stack's damage, so a scenario does

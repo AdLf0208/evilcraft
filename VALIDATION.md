@@ -686,3 +686,60 @@ with no nudge between them, which proves the port's `update_neighbors(.., Output
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 22/22 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).
+
+## Slice 13 (0.2.13) — the Blood Chest's curse roll on repair
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job W1-evilcraft --port ports/evilcraft` were forwarded
+to **AdLf-PC** (`build-slot: forwarding … to the remote runner`); the launcher build and the e2e
+legs stayed local. `CARGO_INCREMENTAL=0`, no `--target-dir`, no `BUILD_LOCAL=1`, no raised slots.
+Full rule and red proof: `notes.md` § **Slice 13**; logs under `ports/_shared/evidence/evilcraft/`.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (rules stubbed) | **FAILED. 80 passed; 4 failed** | `sdk-test-red-slice13.log` |
+| tests (green) | `cargo test` | **84 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+
+| tests (green detail) | `cargo test` | **84 passed, 0 failed** (80 before this slice) | `sdk-test.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, API uses accepted, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **238,554 B** `798435ee…de2be4`, `CMP-IDENTICAL`, 119 entries, no `Cargo.lock` | `sdk-build-a/b-0.2.13.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, 238,554 B, same sha, `CHECK_EXIT:0` | `sdk-check.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `FIT_PIN_EXIT:0` | `sdk-fits.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `FIT_OTHER_EXIT:0` | `sdk-fits.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1** — 84 tests, 0 clippy warnings, runtime byte-identical, **package matches the tree**, check + fits, R9 clean, Skills gate PASS | job report / `sdk-artifact-0.2.13.txt` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-8fb164f6f95f`, `Compiling evilcraft (1 of 1)`; export byte-identical to the port | `launcher-build-0.2.13.log` |
+
+Gates: `check-e2e-logs.py evilcraft-e2e --strict` → **25/25** logs end in `EXIT:<n>`
+(22 earlier legs stay green; the three new legs are this slice's);
+`check-skills.py --notes ports/evilcraft --strict` → PASS; `verify-sdk-package.py evilcraft` → 1/1.
+
+The two e2e legs for this slice (the default and the `SELFTEST=curse` inversion):
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`) | **`PASS` + `EXIT:0`** — A, A2, B–F, D2, D3, E2, H–W, Y, Y2, Z, AA–AI, AK, **AL** | `e2e-launcher-0.2.13.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.13.log` |
+| selftest (this slice) | `SELFTEST=curse` | **`FAIL` + `EXIT:1`** at AL — *SELFTEST flipped: roll 0 added minecraft:vanishing_curse@1, as it should* | `e2e-launcher-selftest-curse-0.2.13.log` |
+
+Transcript of the new phase (verbatim from `e2e-launcher-0.2.13.log`):
+
+```
+== AL: the Blood Chest's 1-in-10,000 curse roll on a repaired damage point ==
+  a clean damage-250 pickaxe in an unfunded chest carries no enchantments
+  roll 0: damage 243 -> 213, tank 1965 -> 1815, 206, 101, -12 has the following block data: {components: {"minecraft:enchantments": {"minecraft:vanishing_curse": 1}, "minecraft:damage": 203}, count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}
+  roll 9999: damage 243 -> 213, tank 1965 -> 1815, 208, 101, -12 has the following block data: {components: {"minecraft:damage": 203}, count: 1, Slot: 0b, id: "minecraft:diamond_pickaxe"}
+  the same tool, chest, tank and 40 ticks: roll 0 curses, roll 9,999 stays clean (the gate is roll == 0)
+```
+
+**Fail-capable three ways.** (1) `SELFTEST=curse` inverts AL's roll-0 equality and exits 1 at that line.
+(2) The differential is the *same* tool, chest, tank and 40 ticks at roll 9,999: the tool repairs
+exactly as much and the tank spends exactly the same, but the saved stack has no
+`minecraft:enchantments` at all — a change that cursed on every repair would fail it, and one that
+never cursed would fail the roll-0 half. (3) The whole-package control has no chest at all. A
+clean pickaxe is also checked *before* funding, so the component cannot have come from the `/give`.
+
+Harness fact worth keeping: **fund the chest only after setting the damage**. A 2,000 mB chest
+repaired a damage-250 pickaxe to 242 during the 12 ticks the setup readout waits (measured on the
+first AL run), so a scenario that asserts the starting damage must use an unfunded chest until the
+readout has confirmed it.

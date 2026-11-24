@@ -133,13 +133,58 @@ pub const MIN_MOB_MULTIPLIER: f64 = 5.0;
 /// Upstream `ItemBloodExtractorConfig.maximumMobMultiplier`.
 pub const MAX_MOB_MULTIPLIER: f64 = 40.0;
 /// Upstream `BlockBloodChestConfig.randomBadEnchantsChance` (1 in this many).
-/// Kept as the documented upstream value; this slice does not apply curses
-/// (see the gap list in `notes.md`).
-#[allow(
-    dead_code,
-    reason = "upstream's curse chance, not applied in this slice"
-)]
+/// `DamageableItemRepairAction.repair` draws `nextInt(chance)` and curses on **0** only.
 pub const BAD_ENCHANT_CHANCE: u32 = 10_000;
+
+/// The domain of `random.nextInt(randomBadEnchantsChance)`: `[0, chance)`.
+/// The caller draws with `next_int_bound(BAD_ENCHANT_CHANCE)`, so this is also the
+/// boundary a forced harness roll must respect.
+#[must_use]
+pub fn curse_roll_domain(roll: u32) -> bool {
+    roll < BAD_ENCHANT_CHANCE
+}
+
+/// Upstream's roll gate in `DamageableItemRepairAction.repair` (line 41), reduced to
+/// its random half: `!isBulk && addRandomBadEnchants && chance >= 0` are established
+/// by the caller (this is the ordinary Blood Chest, the flags are config constants),
+/// and `random.nextInt(chance) == 0` is the condition here — **roll 0 only**, a
+/// one-in-10,000 event, not any roll below the chance.
+#[must_use]
+pub fn bad_enchant_roll(roll: u32) -> bool {
+    curse_roll_domain(roll) && roll == 0
+}
+
+/// The enchantment a winning roll adds. Upstream picks a random element of the
+/// `EnchantmentTags.CURSE` (`#minecraft:curse`) registry tag, not a hardcoded id; at
+/// this pin that is vanilla's two curses, the same [`CURSES`] slice 9 read for the
+/// Purifier. `index` is the caller's `nextInt(curses.size())`.
+#[must_use]
+pub fn rolled_curse(index: u32) -> Option<&'static str> {
+    CURSES.get(index as usize).copied()
+}
+
+/// The level `ItemStack.enchant` is given:
+/// `minLevel + nextInt(maxLevel - minLevel + 1) - 1`. Both vanilla curses declare
+/// `minLevel == maxLevel == 1`, so the draw is `nextInt(1) == 0` and the level is
+/// always 1 — one roll for the index and one for the level, as upstream does.
+#[must_use]
+pub fn curse_level(_level_roll: u32) -> u32 {
+    1
+}
+
+/// `ItemStack.enchant`: add `curse` at `level`, or raise a curse the stack already
+/// carries. An existing enchantment is never duplicated (the 26.3 component is a
+/// map from id to level), and every other enchantment keeps its level and order.
+#[must_use]
+pub fn add_curse(levels: &[(String, u32)], curse: &str, level: u32) -> Vec<(String, u32)> {
+    let mut out = levels.to_vec();
+    if let Some((_, current)) = out.iter_mut().find(|(id, _)| id == curse) {
+        *current = (*current).max(level);
+    } else {
+        out.push((curse.to_owned(), level));
+    }
+    out
+}
 
 /// Upstream `BlockEntityBloodChest.SLOTS_CHEST`: `2 rows × 5 columns`.
 pub const CHEST_SLOTS: usize = 10;
@@ -1696,5 +1741,55 @@ mod tests {
         assert_eq!(comparator_strength(-1, PURIFIER_TANK), 0);
         assert_eq!(comparator_strength(5_000, 0), 0);
         assert_eq!(comparator_strength(5_000, -100), 0);
+    }
+
+    // ---- Slice 13: the Blood Chest's curse roll on a non-bulk damage repair ----
+
+    #[test]
+    fn a_roll_of_zero_is_the_only_one_in_ten_thousand_that_curses() {
+        assert!(
+            bad_enchant_roll(0),
+            "upstream's nextInt(randomBadEnchantsChance) == 0"
+        );
+        for roll in 1..BAD_ENCHANT_CHANCE {
+            assert!(!bad_enchant_roll(roll), "roll {roll} must not add a curse");
+        }
+    }
+
+    #[test]
+    fn the_roll_is_bounded_by_bad_enchant_chance() {
+        // `nextInt(chance)` never returns `chance` or above; only rolls inside that
+        // domain can be the winning roll 0.
+        assert!(curse_roll_domain(0));
+        assert!(curse_roll_domain(BAD_ENCHANT_CHANCE - 1));
+        assert!(!curse_roll_domain(BAD_ENCHANT_CHANCE));
+        assert!(!curse_roll_domain(BAD_ENCHANT_CHANCE + 1));
+        assert!(!curse_roll_domain(u32::MAX));
+        assert!(!bad_enchant_roll(BAD_ENCHANT_CHANCE));
+        assert!(!bad_enchant_roll(u32::MAX));
+    }
+
+    #[test]
+    fn the_rolled_curse_is_a_vanilla_curse_tag_entry_at_level_one() {
+        assert_eq!(rolled_curse(0), Some("minecraft:binding_curse"));
+        assert_eq!(rolled_curse(1), Some("minecraft:vanishing_curse"));
+        assert_eq!(rolled_curse(2), None);
+        assert_eq!(curse_level(0), 1);
+        assert_eq!(curse_level(9_999), 1);
+    }
+
+    #[test]
+    fn a_roll_of_zero_adds_the_curse_to_a_clean_stack() {
+        let before = vec![("minecraft:sharpness".to_owned(), 3)];
+        let after = add_curse(&before, "minecraft:vanishing_curse", 1);
+        assert_eq!(
+            after,
+            vec![
+                ("minecraft:sharpness".to_owned(), 3),
+                ("minecraft:vanishing_curse".to_owned(), 1),
+            ]
+        );
+        // `ItemStack.enchant` raises an existing curse, it does not duplicate it.
+        assert_eq!(add_curse(&after, "minecraft:vanishing_curse", 1), after);
     }
 }

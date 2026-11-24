@@ -271,7 +271,8 @@ impl BlockEntityPart for Purifier {
 // ---------------------------------------------------------------------------
 
 /// `minecraft:enchantments`, as a component the stack's patch is read from and written to.
-struct Enchantments;
+/// Shared with the Blood Chest's curse roll (slice 13): both write the same 26.3 bare map.
+pub(crate) struct Enchantments;
 
 impl Component for Enchantments {
     type Value = Compound;
@@ -301,7 +302,7 @@ impl Component for Enchantments {
 /// own `read_levels` still reads, so this does too. A level the tag does not state as an
 /// integer is not an enchantment this action can read.
 #[must_use]
-fn enchantment_levels(stack: Option<&ItemStack>) -> Vec<(String, u32)> {
+pub(crate) fn enchantment_levels(stack: Option<&ItemStack>) -> Vec<(String, u32)> {
     let Some(stack) = stack else {
         return Vec::new();
     };
@@ -324,7 +325,7 @@ fn enchantment_levels(stack: Option<&ItemStack>) -> Vec<(String, u32)> {
 /// component entirely so the item is the plain one it was before the curse
 /// (`setEnchantmentLevel(enchantment, 0)` removes an enchantment, and an item with none
 /// carries no component).
-fn write_enchantments(stack: &mut ItemStack, levels: &[(String, u32)]) {
+pub(crate) fn write_enchantments(stack: &mut ItemStack, levels: &[(String, u32)]) {
     if levels.is_empty() {
         stack.remove(&Enchantments);
         return;

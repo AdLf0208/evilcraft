@@ -178,8 +178,9 @@
 # SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's,
 # SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour,
 # SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=vengeance flips AJ's immunity,
-# SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split, and
-# SELFTEST=comparator flips AK's 2,000 mB reading (each must FAIL), proving the scenarios can fail.
+# SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split,
+# SELFTEST=comparator flips AK's 2,000 mB reading, and SELFTEST=curse flips AL's roll-0
+# assertion (each must FAIL), proving the scenarios can fail.
 # Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
@@ -2534,4 +2535,88 @@ echo "  stone: comparator powered=$STONE_POWERED, wire reads $STONE_SIGNAL"
 [ "$STONE_SIGNAL" = 0 ] || fail "a comparator facing stone must read 0, got '$STONE_SIGNAL'"
 [ "$STONE_POWERED" = false ] || fail "a comparator facing stone must be unpowered, got '$STONE_POWERED'"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0"
+echo "== AL: the Blood Chest's 1-in-10,000 curse roll on a repaired damage point =="
+# The artefact (`DamageableItemRepairAction.repair`, line 41) gates the curse on four
+# conditions: !isBulk (the ordinary Blood Chest, not the Colossal's bulk action),
+# addRandomBadEnchants=true, chance>=0 and random.nextInt(chance) == 0. A win picks a
+# random `#minecraft:curse` tag entry (binding or vanishing curse) at level 1. The
+# harness arms the draw for one chest position, so roll 0 and roll 9,999 can both be
+# reached in game; the default (no armed draw) still uses the level's random stream.
+CURSE_X=$((X0 + 6)); CURSE_Y=101; CURSE_Z=-12
+ctl command "execute in minecraft:the_end run setblock $CURSE_X $CURSE_Y $CURSE_Z $CHEST" >/dev/null
+ctl wait 10 >/dev/null
+[ "$(block_name "$CURSE_X" "$CURSE_Y" "$CURSE_Z")" = "$CHEST" ] \
+    || fail "the curse-roll chest did not place at $CURSE_X,$CURSE_Y,$CURSE_Z"
+# Damage first with an **empty** tank: a funded chest repairs during the setup read
+# (measured: a 2,000 mB chest took a damage-250 pickaxe to 242 in the 12 ticks the
+# readout waits), so the starting damage would not be the value the scenario set.
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
+ctl wait 4 >/dev/null
+give_to "$CURSE_X" "$CURSE_Y" "$CURSE_Z" minecraft:diamond_pickaxe
+say "evilcraft damage $CURSE_X $CURSE_Y $CURSE_Z 0 250"
+ctl wait 12 >/dev/null
+info "$CURSE_X" "$CURSE_Y" "$CURSE_Z"
+[ "${SLOT0_ITEM:-}" = minecraft:diamond_pickaxe ] \
+    || fail "the curse chest's slot 0 holds ${SLOT0_ITEM:-nothing}, expected a clean pickaxe"
+[ "$SLOT0_DAMAGE" = 250 ] || fail "the curse chest's pickaxe was not damaged (reads $SLOT0_DAMAGE)"
+saved_item "$CURSE_X" "$CURSE_Y" "$CURSE_Z" 0
+eval "$(python3 "$PORT/tools/parse_enchants.py" "$SAVED_ITEM")"
+[ "$ok" = 0 ] || fail "the fresh pickaxe already carries enchantments: $SAVED_ITEM"
+echo "  a clean damage-250 pickaxe in an unfunded chest carries no enchantments"
+
+# Roll 0, curse index 1 = the artefact's `minecraft:vanishing_curse` tag entry.
+say "evilcraft blood $CURSE_X $CURSE_Y $CURSE_Z 2000"
+say "evilcraft curse $CURSE_X $CURSE_Y $CURSE_Z 0 1"
+ctl wait 8 >/dev/null
+info "$CURSE_X" "$CURSE_Y" "$CURSE_Z"
+CURSE_DAMAGE_BEFORE=$SLOT0_DAMAGE
+CURSE_TANK_BEFORE=$TANK
+ctl wait 40 >/dev/null
+info "$CURSE_X" "$CURSE_Y" "$CURSE_Z"
+CURSE_DAMAGE_AFTER=$SLOT0_DAMAGE
+saved_item "$CURSE_X" "$CURSE_Y" "$CURSE_Z" 0
+eval "$(python3 "$PORT/tools/parse_enchants.py" "$SAVED_ITEM")"
+echo "  roll 0: damage $CURSE_DAMAGE_BEFORE -> $CURSE_DAMAGE_AFTER, tank $CURSE_TANK_BEFORE -> $TANK, $SAVED_ITEM"
+[ "$ok" = 1 ] || fail "roll 0 added no enchantment component: '$SAVED_ITEM'"
+[ "$CURSE_DAMAGE_AFTER" -lt "$CURSE_DAMAGE_BEFORE" ] \
+    || fail "roll 0 did not repair the pickaxe ($CURSE_DAMAGE_BEFORE -> $CURSE_DAMAGE_AFTER)"
+[ "$TANK" -lt "$CURSE_TANK_BEFORE" ] \
+    || fail "roll 0 repaired without spending blood ($CURSE_TANK_BEFORE -> $TANK)"
+[ "$ench" = "minecraft:vanishing_curse@1" ] \
+    || fail "roll 0 added '$ench', expected the artefact's minecraft:vanishing_curse@1"
+if [ "$SELFTEST" = curse ]; then
+    echo "  SELFTEST: asserting roll 0 added NO curse (this must fail)"
+    [ "$ench" != "minecraft:vanishing_curse@1" ] \
+        || fail "SELFTEST flipped: roll 0 added $ench, as it should"
+fi
+
+# The differential: a second, otherwise identical chest at roll 9,999 (inside
+# nextInt's domain, but not the winning roll) repairs just as much and adds nothing.
+NO_CURSE_X=$((X0 + 8)); NO_CURSE_Z=-12
+ctl command "execute in minecraft:the_end run setblock $NO_CURSE_X $CURSE_Y $NO_CURSE_Z $CHEST" >/dev/null
+ctl wait 10 >/dev/null
+ctl command "item replace entity @s hotbar.0 with minecraft:diamond_pickaxe 1" >/dev/null
+ctl wait 4 >/dev/null
+give_to "$NO_CURSE_X" "$CURSE_Y" "$NO_CURSE_Z" minecraft:diamond_pickaxe
+say "evilcraft damage $NO_CURSE_X $CURSE_Y $NO_CURSE_Z 0 250"
+ctl wait 12 >/dev/null
+say "evilcraft blood $NO_CURSE_X $CURSE_Y $NO_CURSE_Z 2000"
+say "evilcraft curse $NO_CURSE_X $CURSE_Y $NO_CURSE_Z 9999 1"
+ctl wait 8 >/dev/null
+info "$NO_CURSE_X" "$CURSE_Y" "$NO_CURSE_Z"
+NO_DAMAGE_BEFORE=$SLOT0_DAMAGE
+NO_TANK_BEFORE=$TANK
+ctl wait 40 >/dev/null
+info "$NO_CURSE_X" "$CURSE_Y" "$NO_CURSE_Z"
+NO_DAMAGE_AFTER=$SLOT0_DAMAGE
+saved_item "$NO_CURSE_X" "$CURSE_Y" "$NO_CURSE_Z" 0
+eval "$(python3 "$PORT/tools/parse_enchants.py" "$SAVED_ITEM")"
+echo "  roll 9999: damage $NO_DAMAGE_BEFORE -> $NO_DAMAGE_AFTER, tank $NO_TANK_BEFORE -> $TANK, $SAVED_ITEM"
+[ "$ok" = 0 ] || fail "roll 9999 added an enchantment: '$SAVED_ITEM'"
+[ "$NO_DAMAGE_AFTER" -lt "$NO_DAMAGE_BEFORE" ] \
+    || fail "roll 9999 did not repair the pickaxe ($NO_DAMAGE_BEFORE -> $NO_DAMAGE_AFTER)"
+[ "$TANK" -lt "$NO_TANK_BEFORE" ] \
+    || fail "roll 9999 repaired without spending blood ($NO_TANK_BEFORE -> $TANK)"
+echo "  the same tool, chest, tank and 40 ticks: roll 0 curses, roll 9,999 stays clean (the gate is roll == 0)"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0, and the Blood Chest's non-bulk repair adds minecraft:vanishing_curse@1 at forced roll 0 while the same tool, chest, tank and ticks at roll 9,999 stay clean and both repair and spend blood"

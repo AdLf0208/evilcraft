@@ -14,7 +14,10 @@ Minecraft Java 26.3 on Horizon at pin `0a875da` + mixins `e59da909`.
   **Colossal Blood Chest** (`evilcraft:colossal_blood_chest`) and **Purifier**
   (`evilcraft:purifier`): machines over tanks of blood — repairing items (one damage point
   every two ticks for 5 mB, an anvil step for 125 mB), infusing items through the jar's own
-  recipe files, and stripping one curse per 60 ticks and 1,000 mB.
+  recipe files, and stripping one curse per 60 ticks and 1,000 mB. Each damage point the
+  Blood Chest repairs has an upstream 1-in-10,000 chance to add a random `#minecraft:curse`
+  enchantment (binding or vanishing curse, level 1); the Colossal Chest's bulk repair never
+  curses, as upstream's `!isBulk` gate requires.
 - **Blood Stain** (`evilcraft:blood_stain`): left by a mob's fall death with 20 mB per point
   of max health; a crouching extractor click drains it.
 - **Dark Tank** (`evilcraft:dark_tank`): a 16,000 mB field sink.
@@ -32,8 +35,8 @@ All of it ships in one flat SDK `.hmod`: content, native code and manifest toget
 ## What it does not
 
 The other three Purifier actions, the jar's crafting recipes (their ingredients are not
-carried), the curse roll on repair, worldgen, entities and renderers that a content block
-cannot express. See `notes.md` for the full coverage table and the recorded deviations.
+carried), worldgen, entities and renderers that a content block cannot express. See
+`notes.md` for the full coverage table and the recorded deviations.
 
 ## Building
 

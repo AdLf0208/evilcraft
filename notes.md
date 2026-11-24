@@ -2884,3 +2884,124 @@ reached AK with all 36 earlier phases green.
 ### Skills
 
 Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 13 (0.2.13) — the Blood Chest's curse roll on repair
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da9094f0c2fdda6c627fe9eff22dec6a906f0`,
+game 26.3. The registry entry, the PR and the ledger stay the orchestrator's.
+
+### The gap this slice closes, and why this family
+
+Slice 1's gap list, item 2, verbatim:
+
+> **The curse roll is not applied.** `randomBadEnchants = true`,
+> `randomBadEnchantsChance = 10000` is recorded in `runtime.rs` (`BAD_ENCHANT_CHANCE`) but adding
+> an enchantment component is not implemented.
+
+**Tier:** `deep` still governs the port; this slice is one pure `logic` rule inside it — a
+1-in-10,000 boundary and an enchantment-component write on a stack the chest already repairs.
+No block, machine, entity, renderer or dimension is added.
+
+### The roll condition, read from the artefact (not the constant)
+
+`ports/_shared/upstream/evilcraft/src/main/java/org/cyclops/evilcraft/blockentity/tickaction/bloodchest/DamageableItemRepairAction.java`
+lines 34–55, after `setDamageValue(getDamageValue() - 1)`. The gate is **four** conditions:
+
+```java
+if (!isBulk
+    && BlockBloodChestConfig.addRandomBadEnchants          // = true
+    && BlockBloodChestConfig.randomBadEnchantsChance >= 0  // = 10000
+    && random.nextInt(BlockBloodChestConfig.randomBadEnchantsChance) == 0) { … }
+```
+
+1. `!isBulk` — the ordinary Blood Chest's `RepairItemTickAction` passes `false`; the Colossal
+   Blood Chest's `BulkRepairItemTickAction` passes `true` and **never** curses. The port applies the
+   curse only in `blood.rs`'s chest path, never in `colossal.rs`.
+2. `addRandomBadEnchants == true` and 3. `chance >= 0` are the config constants.
+4. `random.nextInt(chance) == 0`: `nextInt` is bounded to `[0, chance)`, so the curse is added on
+   **roll 0 only** (1/10,000), not on any roll below the chance. `runtime::curse_roll_domain`
+   pins `roll < BAD_ENCHANT_CHANCE`, `bad_enchant_roll` pins `roll == 0` inside it.
+
+The enchantment is **not** a hardcoded `minecraft:vanishing_curse`. Upstream lists every element of
+the `EnchantmentTags.CURSE` (`#minecraft:curse`) registry tag and picks one with
+`random.nextInt(curses.size())`; at this pin that is vanilla's two curses, already in
+`runtime::CURSES` from slice 9 — `minecraft:binding_curse` and `minecraft:vanishing_curse`. The
+level is `minLevel + nextInt(maxLevel - minLevel + 1) - 1`; both curses declare `min == max == 1`,
+so it is always 1 (one index draw and one level draw upstream, as `curse_level` documents). The
+in-game phase forces index 1, the artefact's `minecraft:vanishing_curse`, so the saved stack can be
+asserted exactly.
+
+### TDD: the red proof, before any glue
+
+`sdk-test-red-slice13.log` (the four tests written, the rules stubbed to `false`/`None`/`0`):
+
+```
+---- runtime::tests::a_roll_of_zero_is_the_only_one_in_ten_thousand_that_curses stdout ----
+thread '…' panicked at src/runtime.rs:1727:9:
+upstream's nextInt(randomBadEnchantsChance) == 0
+---- runtime::tests::the_roll_is_bounded_by_bad_enchant_chance stdout ----
+thread '…' panicked at src/runtime.rs:1740:9:
+assertion failed: curse_roll_domain(0)
+---- runtime::tests::the_rolled_curse_is_a_vanilla_curse_tag_entry_at_level_one stdout ----
+thread '…' panicked at src/runtime.rs:1751:9:
+assertion `left == right` failed
+  left: None
+ right: Some("minecraft:binding_curse")
+---- runtime::tests::a_roll_of_zero_adds_the_curse_to_a_clean_stack stdout ----
+thread '…' panicked at src/runtime.rs:1762:9:
+assertion `left == right` failed
+  left: [("minecraft:sharpness", 3)]
+ right: [("minecraft:sharpness", 3), ("minecraft:vanishing_curse", 1)]
+
+test result: FAILED. 80 passed; 4 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+```
+
+Green: `sdk-test.log` — **84 passed, 0 failed**; `sdk-clippy.log` — `cargo fmt --check` clean,
+`cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### What is in it
+
+| Half | What | Source |
+|---|---|---|
+| Rules | `runtime::{curse_roll_domain, bad_enchant_roll, rolled_curse, curse_level, add_curse}` | `DamageableItemRepairAction.repair` |
+| Chest tick | on a **non-bulk** damage repair only, after `write_damage`: draw the roll (and on a win the curse index) from the level's `RandomSource`, then write the enchantment onto the stack | same file, `RepairItemTickAction`'s `isBulk = false` |
+| Writer | `purifier`'s `Enchantments` component, now `pub(crate)` — the same 26.3 bare-map path slice 9 proved in game | `DataComponents.ENCHANTMENTS` |
+| Harness | `/evilcraft curse <pos> <roll> <index>` arms a sticky draw for one chest position, `-1` clears; unarmed ticks use the real level random | harness only (upstream has no commands) |
+| Parser | `tools/parse_enchants.py` reads the `minecraft:enchantments` map out of `data get block … Items[0]` | harness only |
+
+A failed random draw falls back to the chance itself (never to roll 0), so a machine with no
+random stream cannot spontaneously curse a tool.
+
+### Ladder (all through `build-slot.sh`, no `BUILD_LOCAL=1`; compile steps forwarded to AdLf-PC)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (rules stubbed) | **FAILED 4/84** | `sdk-test-red-slice13.log` |
+| tests (green) | `cargo test` | **84 passed, 0 failed** | `sdk-test.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-clippy.log` |
+
+The remaining ladder rows, the artifact, the in-game transcript and the gates are recorded in
+`VALIDATION.md` § Slice 13.
+
+### Coverage table — the rows this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `addRandomBadEnchants` 1/10,000 gate (`roll < chance`, win on 0) | tested | unit `a_roll_of_zero_is_the_only_one_in_ten_thousand_that_curses`, `the_roll_is_bounded_by_bad_enchant_chance`; AL roll 0 vs 9,999 |
+| `#minecraft:curse` tag entry and level 1 | tested | unit `the_rolled_curse_is_a_vanilla_curse_tag_entry_at_level_one`; AL reads `minecraft:vanishing_curse@1` |
+| the enchantment-component write on a repaired stack | tested | unit `a_roll_of_zero_adds_the_curse_to_a_clean_stack`; AL's `data get block … Items[0]` component map |
+| `!isBulk` (the Colossal's bulk repair never curses) | tested | code path: the write lives only in `blood.rs`; `colossal.rs` is untouched, and the Y2/AA legs still read an uncursed stack |
+
+### Deviations this slice adds
+
+1. **The harness's armed draw is sticky per position**, not a one-shot. Upstream draws every
+   repair; arming a draw for one chest position lets a scenario reach the rare branch. With no
+   draw armed the code uses the level's random exactly as upstream does, so the shipped behaviour
+   is unchanged outside a scenario.
+2. **The level roll is only a boundary in the pure rule.** `curse_level` ignores its draw because
+   both vanilla curses are level 1; the port does not spend a third random on a value upstream's
+   `nextInt(1)` always returns as 0. No observable behaviour differs.
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port

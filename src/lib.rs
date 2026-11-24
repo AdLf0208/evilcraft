@@ -19,6 +19,7 @@
 //! chest is the same repair machine at the size of a hollow 3×3×3 shell ([`colossal`]).
 pub mod blood;
 pub mod colossal;
+pub mod curse;
 pub mod dark_tank;
 pub mod infuser;
 pub mod purifier;
@@ -179,6 +180,7 @@ impl Hooks for Mod {
     /// A world opened or closed: no published strength or queued position outlives it.
     fn world_lifecycle(&self, _host: &mut dyn ServerHost, _event: &mut WorldLifecycleEvent<'_>) {
         redstone::clear_worlds();
+        curse::clear_all();
     }
 
     /// `/evilcraft info|blood|damage|held`, the harness commands (upstream has none).
