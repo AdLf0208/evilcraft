@@ -23,6 +23,9 @@ Minecraft Java 26.3 on Horizon at pin `0a875da` + mixins `e59da909`.
   own curse survives the Purifier; this package keeps that item-id rule.
 - Every machine's own item carries its blood tank when broken, clamped to that machine's
   capacity when placed again (`evilcraft:copy_tank_data`).
+- The five tank blocks declare a **comparator output**: upstream's `ceil(15 × amount / capacity)`
+  of their blood tank, published from each machine's tick and announced to nearby comparators
+  whenever it changes. A full Purifier reads 15; 2,000 of 3,000 mB reads 10.
 
 All of it ships in one flat SDK `.hmod`: content, native code and manifest together.
 

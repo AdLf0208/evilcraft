@@ -635,3 +635,54 @@ An unknown id is refused by `/evilcraft load` before the item is given.
 - `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 19/19 logs end in `EXIT:<n>`.
 - `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
 - `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).
+
+## Slice 12 (0.2.12) — the tank blocks' analogue (comparator) output
+
+Pin `0a875da91dbb0fdcb7ba8c42c11341aa229af51a` + mixins `e59da909…`, game 26.3, launcher 0.2.92.
+Compile steps through `build-slot.sh run --job W1-evilcraft --port ports/evilcraft` were forwarded
+to **AdLf-PC** (`build-slot: forwarding … to the remote runner`); the launcher build and the e2e
+legs stayed local. `CARGO_INCREMENTAL=0`, no `--target-dir`, no `BUILD_LOCAL=1`, no raised slots.
+The artefact rule is `ceil(15 × amount / capacity)` (CyclopsCore's `COMPARATOR_MULTIPLIER = 15`);
+the brief's "2,000 mB reads 9" was corrected from the artefact — 2,000/3,000 reads 10, and 9 is
+exercised at 1,800/3,000. Details in `notes.md` § **Slice 12** and `tools/slice12-plan.md`.
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| TDD red | `cargo test` (rule stubbed to 0) | **FAILED 3/78** — *left: 0 / right: 15*, *left: 0 / right: 15*, *left: 0 / right: 10* | `sdk-test-red-slice12.log` |
+| unit tests | `cargo test` | **80 passed, 0 failed** | `sdk-final-check-0.2.12.log` |
+| fmt / clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-final-check-0.2.12.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, 629 API uses, 23 hooks, exit 0 | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **234,814 B** `d203fad4d2fc96fb574724ae4688fc7d39448eb1517558023e1aab06f26b4e78`, `CMP-IDENTICAL`, 118 entries, no `Cargo.lock` | `sdk-build-check-fits-0.2.12.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, exit 0 | `sdk-build-check-fits-0.2.12.log` |
+| fits (the pin) | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for` | `sdk-build-check-fits-0.2.12.log` |
+| fits (another build) | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits` | `sdk-build-check-fits-0.2.12.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** | `sdk-gate-0.2.12.log` |
+| launcher game | `ports/tools/launcher-game.sh build evilcraft` | `native-0a875da-ddf8ad0a3724`, `Compiling evilcraft (1 of 1)`; export byte-identical to the port | `launcher-build-0.2.12.log` |
+
+| e2e default | `tools/e2e.sh` (`OLD=1`, `LEGACY=1`) | **`PASS` + `EXIT:0`** — every earlier phase plus AK | `e2e-launcher-0.2.12.log` |
+| e2e control | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — no chest item | `e2e-launcher-control-0.2.12.log` |
+| e2e selftest | `SELFTEST=comparator` | **`FAIL` + `EXIT:1`** at AK — *the comparator read 10 at 2,000 mB* | `e2e-launcher-selftest-comparator-0.2.12.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=22 ok=22 missing-exit=0
+bad-exit=0` (exit 0): all 19 earlier legs stay green and the three new legs are this slice's.
+
+What the new phase measured (verbatim from `e2e-launcher-0.2.12.log`):
+
+```
+== AK: a comparator reads the Purifier's tank fraction (the analogue output) ==
+  purifier 3000/3000 mB: comparator powered=true, wire reads 15
+  purifier 2000/3000 mB: wire reads 10 (ceil(15 x 2000 / 3000) = 10)
+  purifier 1800/3000 mB: wire reads 9 (ceil(15 x 1800 / 3000) = 9)
+== AK: a comparator facing vanilla stone reads 0 (the vanilla differential) ==
+  stone: comparator powered=false, wire reads 0
+```
+
+A comparator has no block entity at this pin, so its output is read as the `power` of the redstone
+wire in front of it, never with `data get block … OutputSignal`. The 15 → 10 → 9 re-reads happen
+with no nudge between them, which proves the port's `update_neighbors(.., OutputSignal)` path.
+
+### Gates
+
+- `python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` — 22/22 logs end in `EXIT:<n>`.
+- `python3 ports/tools/check-skills.py --notes ports/evilcraft --strict` — PASS.
+- `python3 ports/tools/verify-sdk-package.py evilcraft` — 1/1 (after the final build).

@@ -1,4 +1,4 @@
-# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook; three of the purifier's four actions stay blocked)
+# evilcraft — EvilCraft: the blood loop (slice 1: the repair loop, slice 2: the Blood Infuser, slice 3: the tank in the dropped machine, slice 4: projectile kills, slice 5: the Blood Stain, slice 6: the fall-death stain, slice 7: the Colossal Blood Chest, slice 8: the Dark Tank, slice 9: the Purifier's curse action and the Blook, slice 10: review fixes, slice 11: the Vengeance Pickaxe's immunity, slice 12: the tanks' comparator signal; three of the purifier's four actions stay blocked)
 
 > **Format (2026-11-18):** this port is now the flat **SDK package** (`api = "0.2"`,
 > `[native]` at `0b14f8a`) built by `cargo horizon-mod build`. The `.hnmod`, `mixins/evilcraft/`,
@@ -2703,6 +2703,183 @@ curse is on the stack before the wait.
 
 None new. (`copy_tank_data`'s applier, the shadowed leather recipe, the 25,000 mB recipe, the
 missing pickaxe tag and the two slice-10 data-loss fixes are the earlier slices'.)
+
+### Skills
+
+Skills: superpowers/using-superpowers,brainstorming,writing-plans,test-driven-development,systematic-debugging,verification-before-completion; BeautifulRust/rust-best-practices,rust-port
+
+## Slice 12 — the tank blocks' analogue (comparator) output (0.2.12)
+
+**Pin:** Horizon **`0a875da91dbb0fdcb7ba8c42c11341aa229af51a`** (Nightly 2026-11-20, launcher 0.2.92) +
+mixins **`e59da9094f0c2fdda6c627fe9eff22dec6a906f0`**, `api = "0.2"`, game 26.3. Package **0.2.12**
+on top of 0.2.11 (an Update of our own entry; the registry entry, the PR and the ledger are the
+orchestrator's). The design and the alternative considered are in `tools/slice12-plan.md`.
+
+### The gap this slice closes, and why this family
+
+Slice 9's coverage table, verbatim:
+
+> | particles, action bar, comparator signal | not ported | deviations 7 |
+
+The **comparator signal** half of that row is the one expressible at this pin: `BlockPart::has_analog_output`
+and `BlockPart::analog_output` exist in SDK `0a875da`, and powah 0.2.14/0.2.15 proved the route in
+game at this exact pin. The two other halves are client surfaces (a particle spawn and an action-bar
+readout) that a content mod with no renderer cannot express; they remain `not ported`. No new block,
+block entity, entity or renderer is needed, so the slice stays inside tier **deep** — it is the
+`logic`/redstone half of machines already carried.
+
+### The fraction rule, read from the artefact (and a correction to the brief)
+
+Upstream clone `ports/_shared/upstream/evilcraft`, tag `1.21.1-1.2.100`, commit `aa81220`:
+
+- `block/BlockPurifier.java:120-124`, `block/BlockDarkTank.java:87-91` and
+  `core/block/BlockWithEntityGuiTank.java:48-52` (the Blood Chest's, Infuser's and Colossal's base)
+  all read the block entity's tank and answer
+  `(int)Math.ceil(MinecraftHelpers.COMPARATOR_MULTIPLIER * amount / capacity)`.
+- CyclopsCore `MinecraftHelpersCommon.getComparatorMultiplier()` returns **15** (read from
+  `CyclopsMC/CyclopsCore`, branch `master-26-lts`, `loader-common/.../helper/MinecraftHelpersCommon.java`),
+  confirming the multiplier.
+
+So the rule is **`ceil(15 × stored / capacity)`**, clamped into 0..=15 and 0 for an empty or
+invalid tank: a full Purifier (3,000/3,000) reads **15**, 2,000/3,000 reads **10**, 1,800/3,000
+reads **9**, 6,000/10,000 reads 9, an empty tank reads 0.
+
+**The dispatch note says 2,000 mB reads 9. The artefact disagrees and wins** (AGENTS.md: when a
+brief and the artefact disagree, the artefact wins and the agent reports it): 15 × 2,000/3,000 is
+exactly 10, so `ceil` is 10, not 9. The port carries the artefact's rule; the 9 is still exercised
+in game at 1,800/3,000 mB, where the same rule really gives 9.
+
+### The cache / update route
+
+The comparator hooks receive only a read-only `LevelHost`, which cannot reach a block entity, so
+the reading cannot be computed live there (the same gap powah 0.2.14 recorded):
+
+1. `src/runtime.rs::comparator_strength(stored, capacity)` is the pure arithmetic; it has three
+   new unit tests and no game types.
+2. `src/redstone.rs` keeps a `(LevelKey, [i32;3]) → i32` **cache** of the last strength per world
+   and position, and a `LevelRef → BTreeSet<pos>` **queue** of machine ticks. A static
+   `OnceLock<Mutex<…>>` holds each, cleared by `world_lifecycle` so no reading outlives a world.
+3. Each ticking machine's `block_entity_tick` (chest, infuser, colossal, purifier) queues its
+   position. `Hooks::level_tick_post` drains the queue where every machine is back in the world,
+   reads its saved tank, records the strength, and on a change calls
+   `LevelRef::update_neighbors(host, pos, state, NeighbourUpdate::OutputSignal)` — vanilla's
+   `setChanged` → `updateNeighbourForOutputSignal`, which a tank changing without a block-state
+   change does not get on its own.
+4. The harness `/evilcraft blood` setter and the dark tank's / purifier's crouching pours publish
+   immediately, since they change a tank outside a block-entity tick.
+5. `has_analog_output`/`analog_output` are added to the existing `BlockPart`s of the five tank
+   blocks (chest, infuser, colossal, purifier, dark tank); the answer comes from the cache. The
+   blood stain is deliberately not a comparator block upstream.
+
+### TDD: the red proof, before the implementation
+
+`sdk-test-red-slice12.log` (the three rule tests written with `comparator_strength` stubbed to `0`):
+
+```
+test result: FAILED. 75 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+---- runtime::tests::a_doctored_tank_reading_is_clamped_into_zero_to_fifteen stdout ----
+thread 'runtime::tests::a_doctored_tank_reading_is_clamped_into_zero_to_fifteen' (284655) panicked at src/runtime.rs:1690:9:
+assertion `left == right` failed
+  left: 0
+ right: 15
+
+---- runtime::tests::a_full_tank_reads_fifteen_and_an_empty_one_reads_zero stdout ----
+thread 'runtime::tests::a_full_tank_reads_fifteen_and_an_empty_one_reads_zero' (284666) panicked at src/runtime.rs:1672:9:
+assertion `left == right` failed
+  left: 0
+ right: 15
+
+---- runtime::tests::the_comparator_rounds_up_the_tank_fraction stdout ----
+thread 'runtime::tests::the_comparator_rounds_up_the_tank_fraction' (284699) panicked at src/runtime.rs:1681:9:
+assertion `left == right` failed
+  left: 0
+ right: 10
+```
+
+Green: `sdk-final-check-0.2.12.log` — **80 passed, 0 failed** (75 + 3 rule tests + 2 cache tests),
+`cargo fmt --check` clean and `cargo clippy --all-targets -- -D warnings` 0 warnings.
+
+### The ladder (`build-slot.sh` leases; compile steps forwarded to **AdLf-PC**, game legs local)
+
+| Step | Command | Result | Log |
+|---|---|---|---|
+| tests (red) | `cargo test` (rule stubbed to 0) | **FAILED 3/78** (`EXIT:101`) | `sdk-test-red-slice12.log` |
+| tests (green) | `cargo test` | **80 passed, 0 failed** | `sdk-final-check-0.2.12.log` |
+| fmt + clippy | `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings` | clean, 0 warnings | `sdk-final-check-0.2.12.log` |
+| project check | `cargo horizon-mod check` | `Made for 0a875da`, **629 API uses, 23 hooks**, `EXIT:0` | `sdk-project-check.log` |
+| package ×2 | `rm -f Cargo.lock && cargo horizon-mod build`, twice | **234,814 B**, sha256 `d203fad4…b4e78`, **`CMP-IDENTICAL`**, 118 entries, no `Cargo.lock` | `sdk-build-check-fits-0.2.12.log` |
+| package check | `cargo horizon-mod check evilcraft.hmod` | `native-mod, format native-1/0a875da…/e59da909…, for 26.3`, same sha, `EXIT:0` | `sdk-build-check-fits-0.2.12.log` |
+| fits, the pin | `… fits … --build 0a875da91dbb0fdcb7ba8c42c11341aa229af51a` | `0a875da  made for`, `EXIT:0` | `sdk-build-check-fits-0.2.12.log` |
+| fits, another build | `… fits … --build 0b14f8acfd97fa2c750e42795249dcc981178ca4` | `0b14f8a  fits`, `EXIT:0` | `sdk-build-check-fits-0.2.12.log` |
+| SDK gate | `python3 ports/tools/verify-sdk-package.py evilcraft` | **1/1 package(s) verified** (runtime byte-identical, package matches the tree, R9, no lock, check + fits, Skills line) | `sdk-gate-0.2.12.log` |
+
+### The in-game leg (`evidence/evilcraft-e2e/`, launcher-built game at the pin)
+
+`ports/tools/launcher-game.sh build evilcraft` → tag **`native-0a875da-ddf8ad0a3724`**, log line
+`Compiling evilcraft (1 of 1)`; the export's `src/`, `data/`, `assets/` and `horizon-mod.toml` are
+byte-identical to the port (`diff -r`/`cmp` empty, `version = "0.2.12"`).
+
+| Leg | Command | Verdict | Log |
+|---|---|---|---|
+| default | `tools/e2e.sh` (`OLD=1` for 0.2.3, `LEGACY=1` for 0.2.9) | **`PASS` + `EXIT:0`** — every earlier phase plus **AK** | `e2e-launcher-0.2.12.log` |
+| control (no package) | `CONTROL=1 GAME=$CONTROL_GAME` | **`FAIL` + `EXIT:1`** — the chest item does not register | `e2e-launcher-control-0.2.12.log` |
+| selftest (this slice) | `SELFTEST=comparator` | **`FAIL` + `EXIT:1`** at AK — *SELFTEST flipped: the comparator read 10 at 2,000 mB, as it should* | `e2e-launcher-selftest-comparator-0.2.12.log` |
+
+`python3 ports/tools/check-e2e-logs.py evilcraft-e2e --strict` → `logs=22 ok=22 missing-exit=0
+bad-exit=0` (exit 0): the 19 earlier legs stay green and the three 0.2.12 logs are this slice's.
+
+Transcript of the new phase (verbatim from `e2e-launcher-0.2.12.log`):
+
+```
+== AK: a comparator reads the Purifier's tank fraction (the analogue output) ==
+  right-click on 206,101,-10 (aim on evilcraft:purifier)
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=14776
+  Purifier [206, 101, -10]: tank 3000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=14804
+  purifier 3000/3000 mB: comparator powered=true, wire reads 15
+  Purifier [206, 101, -10]: tank 2000/3000 mB, purge empty@0, add empty@0, ench 0, curses 0, tick 0, t=14882
+  purifier 2000/3000 mB: wire reads 10 (ceil(15 x 2000 / 3000) = 10)
+  purifier 1800/3000 mB: wire reads 9 (ceil(15 x 1800 / 3000) = 9)
+== AK: a comparator facing vanilla stone reads 0 (the vanilla differential) ==
+  stone: comparator powered=false, wire reads 0
+```
+
+**Fail-capable, three ways.** (1) `SELFTEST=comparator` inverts AK's 2,000 mB equality and exits 1.
+(2) The stone half is the vanilla differential on the same rig: a comparator facing a block with
+no analogue output stays unpowered and its wire reads 0. (3) The whole-package control has no
+purifier, so AK cannot even place one. The 15 → 10 → 9 sequence is also the counterfactual for a
+stale cache: without the `OutputSignal` notification the wire would keep reading 15 after the
+harness changed the tank (the first draft's helper-position bug showed the opposite failure —
+empty readings — and was fixed in the harness, not the mod).
+
+### A harness trap this slice cost
+
+The first draft's `cmp_signal`/`cmp_powered` took the **comparator's** position (powah's
+convention), while AK passes the **machine's**; the result was empty `powered`/`power` values and
+`EXIT:1` at AK. The helpers now explicitly take the machine position (wire at z−2, comparator at
+z−1) and the comment at their definition records the difference. The mod's first run otherwise
+reached AK with all 36 earlier phases green.
+
+### Coverage table — the row this slice changes
+
+| Family (jar) | Status | Proof |
+|---|---|---|
+| `hasAnalogOutputSignal` on the five tank blocks | tested | AK: a comparator beside the Purifier is `powered=true`; beside `minecraft:stone` it is not |
+| `getAnalogOutputSignal` = `ceil(15 × amount/capacity)` | tested | AK: 15 at 3,000/3,000, 10 at 2,000/3,000, 9 at 1,800/3,000; unit `the_comparator_rounds_up_the_tank_fraction` |
+| the changed-reading notification (`updateNeighbourForOutputSignal`) | tested | AK: 15 → 10 → 9 re-read on the wire with no nudge between the readings |
+| the vanilla differential | tested | AK: the same comparator rig facing `minecraft:stone` reads 0 |
+| particles and the action-bar readout (the other halves of gap 7) | not ported | client surfaces a content mod with no renderer cannot express |
+
+### Deviations this slice adds
+
+1. **The reading is a published cache, not a live read.** Upstream reads the block entity inside
+   `getAnalogOutputSignal`; the SDK hook cannot, so a strength is published from the tick (and the
+   harness setter/pours) and a changed value notifies the neighbours. A machine whose tank changes
+   through a path this port does not own (a foreign pipe, an explosion) keeps its last published
+   strength until one of the published paths runs — blood tanks are not world fluids here, so no
+   such path is reachable from the carried content.
+2. **The blood stain declares no comparator output**, matching upstream (only `BlockPurifier`,
+   `BlockDarkTank` and `BlockWithEntityGuiTank`'s subclasses override the two methods).
 
 ### Skills
 

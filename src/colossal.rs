@@ -44,7 +44,26 @@ const TICKS: &str = "ticks";
 pub struct Colossal;
 
 #[mod_api::horizon_part]
-impl BlockPart for Colossal {}
+impl BlockPart for Colossal {
+    fn has_analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::HasAnalogOutputEvent,
+    ) {
+        event.output = true;
+    }
+
+    fn analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::AnalogOutputEvent,
+    ) {
+        event.output = crate::redstone::cached_reading(
+            event.dimension,
+            [event.pos.x, event.pos.y, event.pos.z],
+        );
+    }
+}
 
 #[mod_api::horizon_part]
 impl BlockEntityPart for Colossal {
@@ -66,6 +85,7 @@ impl BlockEntityPart for Colossal {
     /// One server tick: empty the container slot into the tank, then (only while the 3×3×3
     /// shell is whole) repair the stacks the tick's pace says are due.
     fn block_entity_tick(&self, host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
+        crate::redstone::queue_tick(&*host, event.pos);
         // The structure is read before the entity is borrowed: the scan needs the level and
         // the entity needs the tick's mutable view.
         let formed = formed_at(host, event.pos);

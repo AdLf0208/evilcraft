@@ -150,6 +150,12 @@
 #     rig with a cursed vanilla diamond pickaxe strips the curse and spends one bucket, which
 #     is the item-id differential. An unknown id is refused by `/evilcraft load`.
 #
+# Slice 12 (0.2.12) — the tank blocks' analogue (comparator) output:
+#  AK a comparator facing the Purifier is `powered=true` and a wire in front of it reads 15 at
+#     3,000/3,000 mB, **10** at 2,000/3,000 (upstream's ceil(15 x amount/capacity); the dispatch
+#     note's 9 is an arithmetic slip) and 9 at 1,800/3,000; re-reads happen without nudging (the
+#     port's OutputSignal notification). A comparator facing `minecraft:stone` reads 0.
+#
 # The previous package (0.2.3) is the third leg: the same bow kill with the same package's
 # `/evilcraft held` reads 0 mB, which is the gap slice 4 closes. `OLD_GAME` names that
 # game (the launcher's export of the 0.2.3 build).
@@ -172,8 +178,9 @@
 # SELFTEST=blood flips Q's, SELFTEST=stain flips S's, SELFTEST=fall flips V's,
 # SELFTEST=colossal flips Y's `formed` assertion, SELFTEST=darktank flips AC's pour,
 # SELFTEST=purifier flips AG's curse-gone assertion, SELFTEST=vengeance flips AJ's immunity,
-# SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split (each
-# must FAIL), proving the scenarios can fail. Phase I is the
+# SELFTEST=anvil flips D2's anvil count and SELFTEST=extractor flips E2's split, and
+# SELFTEST=comparator flips AK's 2,000 mB reading (each must FAIL), proving the scenarios can fail.
+# Phase I is the
 # infuser's own differential: the same machine, the same bone and a full tank do nothing at
 # tier 0 and infuse at tier 3. Phase P is the tank's differential: a chest broken with nothing
 # in its tank drops an item that carries no payload, which is exactly what a break the listener
@@ -288,6 +295,39 @@ launch() { # launch [WORLD] [GAME]
 }
 
 block_name() { ctl block "$1" "$2" "$3" | jq -r '.name // .block // empty'; }
+
+# Slice 12 — reading a comparator at this pin. A comparator has NO block entity here (its output
+# lives in the level's `comparator_outputs` map), so `data get block … OutputSignal` has nothing to
+# read. Its output is measured where the game itself uses it: a redstone wire on its output side
+# carries exactly its signal as `power`, and the comparator's own `powered` flag is read too.
+# `ctl block` answers `name` and `state` (`name[prop=value,…]`), not a property object, so parse
+# the state string.
+block_prop() { # block_prop X Y Z NAME
+    ctl block "$1" "$2" "$3" | jq -r --arg s "$4" '
+        ((.state // "") | [scan("([a-z_]+)=([a-z0-9_]+)")] | map({key: .[0], value: .[1]}) | from_entries | .[$s]) // ""'
+}
+# Both helpers take the MACHINE's position: the wire is two cells north of it, the comparator
+# one. (Powah's versions take the comparator's position instead; keep this convention consistent.)
+cmp_signal() { block_prop "$1" "$2" "$(($3 - 2))" power; }   # wire north of the comparator
+cmp_powered() { block_prop "$1" "$2" "$(($3 - 1))" powered; } # the comparator itself
+# comparator_rig X Y Z: a comparator facing SOUTH at the machine's north face (z-1) reading it,
+# and a wire at z-2 carrying the output. One redstone-block nudge wakes it at setup; after that
+# the port's `update_neighbors(.., OutputSignal)` is the only thing that re-reads a tank change.
+comparator_rig() { # comparator_rig X Y Z
+    ctl command "execute in minecraft:the_end run setblock $1 $2 $(($3 - 1)) minecraft:air" >/dev/null
+    ctl command "execute in minecraft:the_end run setblock $1 $2 $(($3 - 2)) minecraft:air" >/dev/null
+    ctl command "execute in minecraft:the_end run setblock $1 $2 $(($3 - 1)) minecraft:comparator[facing=south]" >/dev/null
+    ctl command "execute in minecraft:the_end run setblock $1 $2 $(($3 - 2)) minecraft:redstone_wire" >/dev/null
+    ctl wait 3 >/dev/null
+    ctl command "execute in minecraft:the_end run setblock $1 $(($2 + 1)) $(($3 - 1)) minecraft:redstone_block" >/dev/null
+    ctl wait 3 >/dev/null
+    ctl command "execute in minecraft:the_end run setblock $1 $(($2 + 1)) $(($3 - 1)) minecraft:air" >/dev/null
+    ctl wait 10 >/dev/null
+    [ "$(block_name "$1" "$2" "$(($3 - 1))")" = minecraft:comparator ] ||
+        fail "the comparator did not place at $1,$2,$(($3 - 1))"
+    [ "$(block_name "$1" "$2" "$(($3 - 2))")" = minecraft:redstone_wire ] ||
+        fail "the wire did not stay at $1,$2,$(($3 - 2))"
+}
 
 # The End's void at X0: a stone floor and clear air above it. The player is
 # teleported first, so the chunks the fills touch are loaded.
@@ -2435,4 +2475,63 @@ purifier "$PUX" "$PUY" "$PUZ"
     || fail "the vanilla pickaxe's purify left the tank at $TANK mB, expected $((PURIFIER_TANK - 1000))"
 echo "  the same curse on a vanilla pickaxe was stripped for one bucket (the item is the difference)"
 
-echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket"
+echo "== AK: a comparator reads the Purifier's tank fraction (the analogue output) =="
+# `BlockPurifier.getAnalogOutputSignal` is ceil(15 x amount / capacity) with CyclopsCore's
+# COMPARATOR_MULTIPLIER = 15: a full 3,000 mB tank reads 15, 2,000 reads 10 and 1,800 reads 9.
+# (The dispatch note's "2,000 mB reads 9" is an arithmetic slip; the artefact's 2,000/3,000 is
+# ceil(10.0) = 10, and the 9 is exercised at 1,800 mB below.) The hook cannot read a block entity,
+# so the port publishes the fraction from the machine's tick and notifies the comparator when it
+# changes — the wire is read again without nudging the comparator.
+[ "$(block_name "$PUX" "$PUY" "$PUZ")" = "$PURIFIER" ] \
+    || fail "the purifier from phase AJ is gone; the comparator rig needs it"
+# An uncursed item in the purge slot would make the action spend blood mid-phase.
+empty_hand
+stand_click "$PUX" "$PUY" "$PUZ" .5 "$PURIFIER"
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$PURGE_ITEM" = empty ] \
+    || fail "the purge slot still holds $PURGE_ITEM before the comparator phase"
+say "evilcraft blood $PUX $PUY $PUZ $PURIFIER_TANK"
+ctl wait 12 >/dev/null
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$TANK" = "$PURIFIER_TANK" ] || fail "the purifier tank is $TANK mB, expected $PURIFIER_TANK"
+comparator_rig "$PUX" "$PUY" "$PUZ"
+FULL_POWERED=$(cmp_powered "$PUX" "$PUY" "$PUZ")
+FULL_SIGNAL=$(cmp_signal "$PUX" "$PUY" "$PUZ")
+echo "  purifier $PURIFIER_TANK/$PURIFIER_TANK mB: comparator powered=$FULL_POWERED, wire reads $FULL_SIGNAL"
+[ "$FULL_POWERED" = true ] || fail "a comparator beside a full purifier must be powered, got '$FULL_POWERED'"
+[ "$FULL_SIGNAL" = 15 ] || fail "a full purifier must read comparator 15, got '$FULL_SIGNAL'"
+
+# A tank changing without a block-state change: the port's OutputSignal notification is the only
+# thing that makes the comparator read again (no nudge between the three readings).
+say "evilcraft blood $PUX $PUY $PUZ 2000"
+ctl wait 16 >/dev/null
+purifier "$PUX" "$PUY" "$PUZ"
+[ "$TANK" = 2000 ] || fail "the purifier tank is $TANK mB after setting 2,000"
+TWO_SIGNAL=$(cmp_signal "$PUX" "$PUY" "$PUZ")
+echo "  purifier 2000/$PURIFIER_TANK mB: wire reads $TWO_SIGNAL (ceil(15 x 2000 / 3000) = 10)"
+[ "$TWO_SIGNAL" = 10 ] \
+    || fail "2,000 of 3,000 mB is ceil(10.0) = comparator 10, got '$TWO_SIGNAL'"
+if [ "$SELFTEST" = comparator ]; then
+    echo "  SELFTEST: asserting the 2,000 mB reading is NOT 10 (this must fail)"
+    [ "$TWO_SIGNAL" != 10 ] || fail "SELFTEST flipped: the comparator read $TWO_SIGNAL at 2,000 mB, as it should"
+fi
+
+say "evilcraft blood $PUX $PUY $PUZ 1800"
+ctl wait 16 >/dev/null
+NINE_SIGNAL=$(cmp_signal "$PUX" "$PUY" "$PUZ")
+echo "  purifier 1800/$PURIFIER_TANK mB: wire reads $NINE_SIGNAL (ceil(15 x 1800 / 3000) = 9)"
+[ "$NINE_SIGNAL" = 9 ] \
+    || fail "1,800 of 3,000 mB is ceil(9.0) = comparator 9, got '$NINE_SIGNAL'"
+
+echo "== AK: a comparator facing vanilla stone reads 0 (the vanilla differential) =="
+STONE_X=200; STONE_Y=101; STONE_Z=10
+ctl command "execute in minecraft:the_end run setblock $STONE_X $STONE_Y $STONE_Z minecraft:stone" >/dev/null
+ctl wait 5 >/dev/null
+comparator_rig "$STONE_X" "$STONE_Y" "$STONE_Z"
+STONE_SIGNAL=$(cmp_signal "$STONE_X" "$STONE_Y" "$STONE_Z")
+STONE_POWERED=$(cmp_powered "$STONE_X" "$STONE_Y" "$STONE_Z")
+echo "  stone: comparator powered=$STONE_POWERED, wire reads $STONE_SIGNAL"
+[ "$STONE_SIGNAL" = 0 ] || fail "a comparator facing stone must read 0, got '$STONE_SIGNAL'"
+[ "$STONE_POWERED" = false ] || fail "a comparator facing stone must be unpowered, got '$STONE_POWERED'"
+
+echo "PASS: an empty chest reads 0/10,000 mB, an empty tank repairs nothing, 1,000 mB repairs one damage point every two ticks for exactly 5 mB a point, a chipped anvil becomes an anvil for 125 mB, a stack of two chipped anvils becomes two anvils for 250 mB with its custom name kept (125 mB leaves the stack alone) and the same stack in the Colossal Blood Chest does too, a damaged enchanted pickaxe keeps its enchantment through the repair, a legacy stack of two Blood Extractors is split into two single extractors (the first keeping the whole 4,000 mB, the second 0) and a crouching click on a 3,500 mB stain fills only the first (held 5,000, the other still 0), a player kill fills the carried Blood Extractor with a 20 HP zombie's 100..799 mB, a bow kill fills it too while a skeleton's arrow leaves it empty, the extractor in a container slot empties into the tank, the Blood Infuser reads all 10 of its carried recipe files (the Blook's included) and refuses an unknown id, holds a tier-3 recipe at tier 0 and infuses it once a Promise of Tenacity III tiers the machine, crafts every carried recipe for its own blood cost, empties a filled extractor into its tank, breaks back into itself, a chest holding 6,500 mB is broken into an item that carries that tank (and none of its stacks) and places back with 6,500 mB while an empty chest carries nothing and a 20,000 mB payload is clamped to 10,000, a crouching click with a 4,000 mB extractor draws exactly the 1,000 mB it had room for out of a 3,500 mB blood stain (standing moves nothing, stone moves nothing), a drained stain removes its block, a stone placed onto a stain lands above it (minecraft:replaceable is inert at this pin), a 20 HP zombie that dies of a fall leaves a blood stain holding 20 x 20 = 400 mB which a second fall on the same cell tops up to 800 mB with no second block, the same zombie killed with a sword leaves the cell empty, a hollow 3x3x3 shell of reinforced undead planks around one colossal blood chest reads formed=true with 45 repair slots and repairs a damage-250 pickaxe one point every two ticks for 5 mB (1,000 mB = 200 points until the tank is empty) while a single shell block out reads formed=false and repairs nothing over the same ticks, the open machine still empties a 1,000 mB extractor from its 50-slot menu into its tank and repairs again once the plank is back, a plain Blood Chest repairs the same pickaxe at the same rate, the controller breaks into an item carrying its 4,000 mB with an axe, a dark tank reads 0/16000 mB and a crouching click with a full extractor pours exactly the 2,000 mB room a 14,000 mB tank had (the extractor keeping 3,000, the saved fluids 16,000) while a standing click and a crouching click on stone pour nothing and the same crouching click on a fresh tank pours its 5,000, and a tank broken with 12,000 mB drops itself carrying that blood and places back at 12,000/16000 mB, a fresh purifier reads 0/3000 mB and a standing click puts one cursed diamond pickaxe in its purge slot (the block entity's own saved Items[0] carrying minecraft:vanishing_curse), 140 ticks strip that curse for exactly one bucket (the saved item carries no minecraft:enchantments any more and the tank fell 3000 -> 2000) while the same cursed pickaxe in a working blood chest for the same ticks still carries it and spends nothing, the empty hand takes the purified pickaxe back out, a standing click puts a filled extractor in the purge slot instead of pouring and the same click crouching pours exactly the 1,000 mB room the tank had (the extractor keeping 4,000, the saved fluids 3000), the Blook is crafted from a book through the Blood Infuser for 500 mB in 500 ticks, and a cursed Vengeance Pickaxe keeps its curse and its Purifier tank of blood after 140 ticks while the same curse on a vanilla pickaxe is stripped for one bucket, a comparator beside a full Purifier is powered and reads 15 on the wire in front of it, a tank of 2,000/3,000 mB re-reads as 10 without a nudge (upstream's ceil(15 x amount/capacity), the artefact's answer where the brief guessed 9) and 1,800/3,000 mB reads 9, while a comparator facing vanilla stone reads 0"

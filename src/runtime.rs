@@ -747,6 +747,31 @@ pub fn purified_for(item: &str, levels: &[(String, u32)]) -> (Vec<(String, u32)>
     purified(levels)
 }
 
+// ---------------------------------------------------------------------------
+// Slice 12: the tank blocks' analogue (comparator) output
+// ---------------------------------------------------------------------------
+
+/// Upstream's comparator reading for a tank block: `BlockPurifier.getAnalogOutputSignal`,
+/// `BlockDarkTank.getAnalogOutputSignal` and `BlockWithEntityGuiTank.getAnalogOutputSignal`
+/// (the blood chest, the infuser and the colossal chest) all compute
+/// `(int)Math.ceil(MinecraftHelpers.COMPARATOR_MULTIPLIER * amount / capacity)` with
+/// `COMPARATOR_MULTIPLIER = 15` (CyclopsCore `MinecraftHelpersCommon.getComparatorMultiplier`).
+///
+/// The hook that asks for this can only read the block's state, not its block entity, so the game
+/// side publishes the strength from the machine's tick into a cache ([`crate::redstone`]); this
+/// rule is the pure arithmetic the publisher uses. An empty tank reads 0, a full one 15.
+#[must_use]
+pub fn comparator_strength(stored: i32, capacity: i32) -> i32 {
+    if capacity <= 0 || stored <= 0 {
+        return 0;
+    }
+    // The ceiling without floating point, so a fraction exactly on an integer stays on it:
+    // ceil(15 * stored / capacity). Wide intermediates cannot overflow two i32s.
+    let numerator = 15i64 * i64::from(stored);
+    let strength = (numerator + i64::from(capacity) - 1) / i64::from(capacity);
+    strength.clamp(0, 15) as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1645,5 +1670,31 @@ mod tests {
         assert!(one_extractor(1));
         assert!(!one_extractor(2));
         assert!(!one_extractor(0));
+    }
+
+    #[test]
+    fn a_full_tank_reads_fifteen_and_an_empty_one_reads_zero() {
+        assert_eq!(comparator_strength(PURIFIER_TANK, PURIFIER_TANK), 15);
+        assert_eq!(comparator_strength(0, PURIFIER_TANK), 0);
+        assert_eq!(comparator_strength(6_000, TANK_CAPACITY), 9);
+    }
+
+    #[test]
+    fn the_comparator_rounds_up_the_tank_fraction() {
+        // `ceil(15 * amount / capacity)`: 2,000 of 3,000 is ceil(10.0) = 10, not 9; the 9 is
+        // a 6,000/10,000 tank (asserted above). Every non-empty fraction rounds up.
+        assert_eq!(comparator_strength(2_000, PURIFIER_TANK), 10);
+        assert_eq!(comparator_strength(1_000, PURIFIER_TANK), 5);
+        assert_eq!(comparator_strength(1, PURIFIER_TANK), 1);
+        assert_eq!(comparator_strength(1_500, TANK_CAPACITY), 3);
+        assert_eq!(comparator_strength(2_999, PURIFIER_TANK), 15);
+    }
+
+    #[test]
+    fn a_doctored_tank_reading_is_clamped_into_zero_to_fifteen() {
+        assert_eq!(comparator_strength(PURIFIER_TANK + 500, PURIFIER_TANK), 15);
+        assert_eq!(comparator_strength(-1, PURIFIER_TANK), 0);
+        assert_eq!(comparator_strength(5_000, 0), 0);
+        assert_eq!(comparator_strength(5_000, -100), 0);
     }
 }

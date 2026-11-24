@@ -22,13 +22,15 @@ pub mod colossal;
 pub mod dark_tank;
 pub mod infuser;
 pub mod purifier;
+pub mod redstone;
 pub mod runtime;
 pub mod stain;
 pub mod tank;
 
 use mod_api::{
-    self, BlockDropsEvent, Flow, Hooks, LevelHost, LivingDeathEvent, RegisterCommandsEvent,
-    Registrar, RegistrationContext, RunModCommandEvent, ServerHost,
+    self, BlockDropsEvent, Flow, Hooks, HostSide, LevelHost, LevelTickPostEvent, LivingDeathEvent,
+    RegisterCommandsEvent, Registrar, RegistrationContext, RunModCommandEvent, ServerHost,
+    WorldLifecycleEvent,
 };
 
 /// The mod has no settings and no state of its own.
@@ -158,6 +160,25 @@ impl Hooks for Mod {
         stain::on_death(host, event);
         blood::on_living_death(host, event);
         Flow::Continue
+    }
+
+    /// After the level's tick: the machines' tanks are back in the world, so read the strength
+    /// each one published and tell the comparators beside a changed one to read it again
+    /// (`Level.updateNeighbourForOutputSignal`, upstream's `setChanged` path).
+    fn level_tick_post(&self, host: HostSide<'_>, event: &mut LevelTickPostEvent) {
+        let HostSide::Server(host) = host else {
+            return;
+        };
+        if !event.level.in_place(host) {
+            return;
+        }
+        let queued = redstone::take_queued(event.level);
+        redstone::on_level_tick_post(host, event.level, queued);
+    }
+
+    /// A world opened or closed: no published strength or queued position outlives it.
+    fn world_lifecycle(&self, _host: &mut dyn ServerHost, _event: &mut WorldLifecycleEvent<'_>) {
+        redstone::clear_worlds();
     }
 
     /// `/evilcraft info|blood|damage|held`, the harness commands (upstream has none).

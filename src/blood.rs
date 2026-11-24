@@ -59,7 +59,28 @@ pub struct Chest;
 pub struct Extractor;
 
 #[mod_api::horizon_part]
-impl BlockPart for Chest {}
+impl BlockPart for Chest {
+    /// Upstream `BlockWithEntityGuiTank.hasAnalogOutputSignal`: every tank machine declares one.
+    fn has_analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::HasAnalogOutputEvent,
+    ) {
+        event.output = true;
+    }
+
+    /// The tank fraction published from the machine's tick (the hook's level cannot read the BE).
+    fn analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::AnalogOutputEvent,
+    ) {
+        event.output = crate::redstone::cached_reading(
+            event.dimension,
+            [event.pos.x, event.pos.y, event.pos.z],
+        );
+    }
+}
 
 #[mod_api::horizon_part]
 impl BlockEntityPart for Chest {
@@ -81,6 +102,9 @@ impl BlockEntityPart for Chest {
     /// One server tick: empty the container slot into the tank, then repair the stacks
     /// the tick's pace says are due.
     fn block_entity_tick(&self, host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
+        // The tank's comparator reading is published at the level tick's end, when this entity
+        // is back in the world (slice 12).
+        crate::redstone::queue_tick(&*host, event.pos);
         let entity = &mut *event.entity;
         if entity.items.len() < SLOT_COUNT {
             return;
@@ -544,6 +568,11 @@ fn set_blood(host: &mut dyn ServerHost, source: &CommandSource, invocation: &Com
     let changed = matches!(entity.merge_data(host, patch), Ok(true));
     if changed {
         let _ = entity.set_data_slots(host, vec![amount, capacity]);
+        // The harness writes the tank directly; publish the new fraction so a comparator beside
+        // the machine re-reads it without waiting for a tick (slice 12).
+        if let Some(level) = level_of(host, source) {
+            crate::redstone::publish_tank(host, level, pos, amount, capacity);
+        }
         say(
             host,
             format!("Blood tank at {pos:?}: {amount}/{capacity} mB."),

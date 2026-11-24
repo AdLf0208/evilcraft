@@ -32,7 +32,27 @@ pub const DARK_TANK_BLOCK: &str = "dark_tank";
 pub struct DarkTank;
 
 #[mod_api::horizon_part]
-impl BlockPart for DarkTank {}
+impl BlockPart for DarkTank {
+    /// Upstream `BlockDarkTank.hasAnalogOutputSignal`.
+    fn has_analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::HasAnalogOutputEvent,
+    ) {
+        event.output = true;
+    }
+
+    fn analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::AnalogOutputEvent,
+    ) {
+        event.output = crate::redstone::cached_reading(
+            event.dimension,
+            [event.pos.x, event.pos.y, event.pos.z],
+        );
+    }
+}
 
 #[mod_api::horizon_part]
 impl BlockEntityPart for DarkTank {
@@ -143,8 +163,11 @@ fn fill(host: &mut dyn ServerHost, player: PlayerRef, event: &UseOnEvent<'_>) ->
     if !written {
         // The extractor kept its blood, so the tank gives back what it was just given.
         let _ = write_tank(host, &entity, tank);
+        crate::redstone::publish_tank(host, level, event.pos, tank, DARK_TANK_CAPACITY);
         return false;
     }
+    // A dark tank has no tick of its own, so the comparator beside it is notified here.
+    crate::redstone::publish_tank(host, level, event.pos, outcome.tank, DARK_TANK_CAPACITY);
     true
 }
 

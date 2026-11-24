@@ -236,7 +236,26 @@ pub fn tanks() -> ModFluidTanks {
 pub struct Infuser;
 
 #[mod_api::horizon_part]
-impl BlockPart for Infuser {}
+impl BlockPart for Infuser {
+    fn has_analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::HasAnalogOutputEvent,
+    ) {
+        event.output = true;
+    }
+
+    fn analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::AnalogOutputEvent,
+    ) {
+        event.output = crate::redstone::cached_reading(
+            event.dimension,
+            [event.pos.x, event.pos.y, event.pos.z],
+        );
+    }
+}
 
 #[mod_api::horizon_part]
 impl BlockEntityPart for Infuser {
@@ -255,6 +274,7 @@ impl BlockEntityPart for Infuser {
     /// One server tick: empty the container slot into the tank, then advance the
     /// infusion the input slot names, at the tier the upgrade slots set.
     fn block_entity_tick(&self, host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
+        crate::redstone::queue_tick(&*host, event.pos);
         let entity = &mut *event.entity;
         if entity.items.len() < INFUSER_SLOTS {
             return;

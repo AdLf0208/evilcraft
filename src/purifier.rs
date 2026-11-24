@@ -112,6 +112,26 @@ pub struct Purifier;
 
 #[mod_api::horizon_part]
 impl BlockPart for Purifier {
+    /// Upstream `BlockPurifier.hasAnalogOutputSignal`: the tank's fill fraction is its output.
+    fn has_analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::HasAnalogOutputEvent,
+    ) {
+        event.output = true;
+    }
+
+    fn analog_output(
+        &self,
+        _level: &dyn mod_api::LevelHost,
+        event: &mut mod_api::AnalogOutputEvent,
+    ) {
+        event.output = crate::redstone::cached_reading(
+            event.dimension,
+            [event.pos.x, event.pos.y, event.pos.z],
+        );
+    }
+
     /// `BlockPurifier.useItemOn`: a filled Blood Extractor pours its blood into the tank when
     /// it is clicked crouching (this port's container gesture, as on the dark tank and the
     /// stain), and any other click puts one item into the purify slot when that slot is
@@ -209,6 +229,7 @@ impl BlockEntityPart for Purifier {
     /// whether anything applies, count the tick, and run the action on its duration tick.
     /// With one action carried, the table is [`crate::runtime::purify_tick`].
     fn block_entity_tick(&self, host: &mut dyn ServerHost, event: &mut BlockEntityTickEvent<'_>) {
+        crate::redstone::queue_tick(&*host, event.pos);
         let entity = &mut *event.entity;
         if entity.items.len() < PURIFIER_SLOTS {
             return;
@@ -451,8 +472,11 @@ fn pour(
         let mut patch = Compound::new();
         crate::blood::write_tank_with(&mut patch, tank, PURIFIER_TANK);
         let _ = entity.merge_data(host, patch);
+        crate::redstone::publish_tank(host, level, pos, tank, PURIFIER_TANK);
         return false;
     }
+    // The pour changes the tank outside a block-entity tick; tell the comparators now.
+    crate::redstone::publish_tank(host, level, pos, filled, PURIFIER_TANK);
     true
 }
 
